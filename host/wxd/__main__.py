@@ -1,4 +1,4 @@
-"""wxd CLI: run | preview | scan | push."""
+"""wxd CLI: run | preview | scan | push | testpattern."""
 
 from __future__ import annotations
 
@@ -182,6 +182,52 @@ def cmd_preview(cfg: Config, out: str) -> int:
     return 0
 
 
+def test_pattern_image():
+    """Bring-up pattern: RED | BLACK | WHITE thirds, labelled, plus a corner marker.
+
+    Verifies red polarity (CONFIG_WX_EPD_RED_INVERT) and orientation at a glance.
+    """
+    from importlib.resources import files
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    from .render import BLACK, RED, WHITE, _PALETTE
+
+    img = Image.new("P", (296, 128), WHITE)
+    img.putpalette(_PALETTE)
+    d = ImageDraw.Draw(img)
+    d.fontmode = "1"
+    font = ImageFont.truetype(str(files("wxd") / "assets" / "DejaVuSans-Bold.ttf"), 22)
+    w = 296 // 3
+    for i, (bg, fg, label) in enumerate([(RED, WHITE, "RED"), (BLACK, WHITE, "BLACK"), (WHITE, BLACK, "WHITE")]):
+        x0 = i * w
+        d.rectangle([x0, 24, x0 + w - 1, 103], fill=bg)
+        d.text((x0 + w // 2, 64), label, fill=fg, font=font, anchor="mm")
+    d.rectangle([0, 0, 295, 127], outline=BLACK)
+    d.polygon([(0, 0), (20, 0), (0, 20)], fill=RED)  # top-left marker
+    d.text((24, 2), "TOP LEFT", fill=BLACK, font=ImageFont.truetype(str(files("wxd") / "assets" / "DejaVuSans-Bold.ttf"), 16))
+    return img
+
+
+async def cmd_testpattern(cfg: Config, out: str | None) -> int:
+    from .ble import WxBle
+    from .render import to_planes
+
+    img = test_pattern_image()
+    if out:
+        img.save(out)
+        print(f"wrote {out}")
+        return 0
+    payload = to_planes(img, make_render_config(cfg))
+
+    def get_payload(_status: P.DeviceStatus) -> bytes:
+        return payload
+
+    ble = WxBle(_settings(cfg), get_payload)
+    res = await ble.run(once=True)
+    return 0 if res is not None else 1
+
+
 async def cmd_scan(cfg: Config, seconds: float) -> int:
     from .ble import scan_devices
 
@@ -213,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     sc = sub.add_parser("scan", help="list nearby WxPaper devices")
     sc.add_argument("--seconds", type=float, default=15.0)
     sub.add_parser("push", help="wait for the device, push once, exit")
+    tp = sub.add_parser("testpattern", help="push a red/black/white bring-up pattern once (or --out PNG)")
+    tp.add_argument("--out", help="write the pattern to a PNG instead of pushing")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -230,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(cmd_run(cfg, once=True))
         if args.cmd == "preview":
             return cmd_preview(cfg, args.out)
+        if args.cmd == "testpattern":
+            return asyncio.run(cmd_testpattern(cfg, args.out))
         if args.cmd == "scan":
             return asyncio.run(cmd_scan(cfg, args.seconds))
     except KeyboardInterrupt:

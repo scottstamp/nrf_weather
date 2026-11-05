@@ -133,6 +133,15 @@ def bleak_connector(adapter: str | None = None, timeout: float = CONNECT_TIMEOUT
             kwargs["adapter"] = adapter
         client = BleakClient(device, **kwargs)
         await client.connect()
+        # BlueZ: bleak reports MTU 23 unless it is acquired explicitly (AcquireWrite on
+        # the write-without-response Data characteristic). Without this every Data
+        # write is 20 bytes -> ~530 writes instead of ~40.
+        acquire = getattr(getattr(client, "_backend", None), "_acquire_mtu", None)
+        if acquire is not None:
+            try:
+                await acquire()
+            except Exception as e:  # noqa: BLE001
+                log.warning("MTU acquire failed (%s); using %d", e, getattr(client, "mtu_size", 23))
         try:
             yield BleakGattClient(client)
         finally:
@@ -178,11 +187,20 @@ async def _final_write(client: GattClient, data: bytes) -> bool:
 
 
 async def _upload(client: GattClient, payload: bytes, crc: int, now: int, response: bool) -> bool:
-    chunk = chunk_size_for_mtu(client.mtu)
+    mtu = client.mtu
+    chunk = chunk_size_for_mtu(mtu)
+    t0 = time.monotonic()
     await client.write_control(P.op_begin(crc, now))
-    for c in P.data_chunks(payload, chunk):
+    chunks = P.data_chunks(payload, chunk)
+    for c in chunks:
         await client.write_data(c, response=response)
-    return await _final_write(client, P.op_commit())
+    t1 = time.monotonic()
+    dropped = await _final_write(client, P.op_commit())
+    log.info(
+        "upload: mtu=%d chunk=%d writes=%d rsp=%s data=%.2fs commit=%.2fs",
+        mtu, chunk, len(chunks), response, t1 - t0, time.monotonic() - t1,
+    )
+    return dropped
 
 
 async def run_session(
@@ -197,7 +215,7 @@ async def run_session(
     if status.proto_version != P.PROTO_VERSION:
         raise SessionError(f"unsupported protocol version {status.proto_version}")
 
-    if interval_s and interval_s != status.poll_interval_s and 300 <= interval_s <= 86400:
+    if interval_s and interval_s != status.poll_interval_s and P.MIN_INTERVAL_S <= interval_s <= P.MAX_INTERVAL_S:
         try:
             await client.write_control(P.op_set_interval(interval_s))
         except AttError as e:

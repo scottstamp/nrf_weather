@@ -1,0 +1,24 @@
+/*
+ * For Adafruit-UF2-bootloader boards WITHOUT a SoftDevice (INFO_UF2.TXT says
+ * "SoftDevice: not found", common on ProMicro/SuperMini clones). The bootloader
+ * then starts the app right after the MBR at 0x1000 instead of 0x26000.
+ *   west build ... -- -DEXTRA_DTC_OVERLAY_FILE=boards/uf2_no_softdevice.overlay
+ * Layout: 0x0 MBR (4 KB) | 0x1000 app (940 KB) | 0xEC000 storage | 0xF4000 UF2 bootloader
+ */
+/delete-node/ &code_partition;
+/delete-node/ &reserved_partition_0;
+
+&flash0 {
+	partitions {
+		mbr_partition: partition@0 {
+			label = "MBR";
+			read-only;
+			reg = <0x00000000 0x00001000>;
+		};
+
+		code_partition: partition@1000 {
+			label = "Application";
+			reg = <0x00001000 0x000eb000>;
+		};
+	};
+};

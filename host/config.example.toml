@@ -22,4 +22,4 @@ red_invert = false     # keep false: fix panel red polarity in firmware (CONFIG_
 [ble]
 # device_address = "AA:BB:CC:DD:EE:FF"   # optional: pin one device (default: match name/service UUID)
 adapter = "hci0"
-poll_interval_s = 1800                    # sent via SET_INTERVAL if device differs (300..86400)
+poll_interval_s = 1800                    # sent via SET_INTERVAL if device differs (60..86400)

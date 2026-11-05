@@ -54,7 +54,7 @@ First byte is the opcode.
 | `0x01` | BEGIN | u32 total_len, u32 crc32, u8 format, u32 unix_time | Start an image transfer. `total_len` must be 9472 and `format` must be 0 (raw planes). Resets receive offset to 0. |
 | `0x02` | COMMIT | — | Validate length + CRC. On success: device disconnects, then does a full panel refresh. |
 | `0x03` | NO_CHANGE | u32 unix_time | Nothing to draw. Device records contact time and disconnects. |
-| `0x04` | SET_INTERVAL | u32 seconds | 300 ≤ s ≤ 86400. Takes effect from the next sleep. Not persisted across reset in v1. |
+| `0x04` | SET_INTERVAL | u32 seconds | 60 ≤ s ≤ 86400 (60 s is for debugging; production 1800). Takes effect from the next sleep. Not persisted across reset in v1. |
 
 Ordering: `SET_INTERVAL` may be written at any point before the final op (the host sends it right after reading Status); the device drops the link ~150 ms after a successful `COMMIT`/`NO_CHANGE`, so anything after the final op is lost. `displayed_crc == 0` means "no known image" — the host never sends `NO_CHANGE` against 0.
 

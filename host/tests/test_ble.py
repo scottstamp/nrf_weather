@@ -97,7 +97,7 @@ class FakeDevice:
                 raise DisconnectedError("lost ack")
         elif op == P.OP_SET_INTERVAL:
             (s,) = struct.unpack_from("<I", data, 1)
-            if not 300 <= s <= 86400:
+            if not P.MIN_INTERVAL_S <= s <= P.MAX_INTERVAL_S:
                 raise AttError(P.ERR_BAD_VALUE)
             self.status.poll_interval_s = s
             self.log.append(f"INTERVAL {s}")

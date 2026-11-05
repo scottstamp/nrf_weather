@@ -12,6 +12,13 @@ west build -b promicro_nrf52840/nrf52840/uf2 -d build-debug . -- -DEXTRA_CONF_FI
 # clones without 32 kHz crystal: add rc_lfclk.conf, e.g. -DEXTRA_CONF_FILE="rc_lfclk.conf"
 ```
 
+**Bootloader without SoftDevice** (ProMicro clones whose `INFO_UF2.TXT` says "SoftDevice: not found", including the board used in bring-up): the bootloader starts the app at 0x1000, so add the partition overlay. Without it the app is linked at 0x26000 and never runs:
+
+```sh
+west build -b promicro_nrf52840/nrf52840/uf2 -d build . -- -DEXTRA_DTC_OVERLAY_FILE=boards/uf2_no_softdevice.overlay
+west build -b promicro_nrf52840/nrf52840/uf2 -d build-debug . -- -DEXTRA_CONF_FILE=debug.conf -DEXTRA_DTC_OVERLAY_FILE=boards/uf2_no_softdevice.overlay
+```
+
 Output: `build/firmware/zephyr/zephyr.uf2`. NCS builds with sysbuild by default, so the image sits in a subfolder named after the app directory.
 
 To flash, double-tap RESET on the nice!nano. A `NICENANO` USB drive appears; copy `zephyr.uf2` onto it. The board reboots into the app.

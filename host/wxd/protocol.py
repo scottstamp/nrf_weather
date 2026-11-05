@@ -22,6 +22,9 @@ PLANE_BYTES = ROW_BYTES * NATIVE_H  # 4736
 PAYLOAD_BYTES = 2 * PLANE_BYTES  # 9472
 FORMAT_RAW = 0
 
+MIN_INTERVAL_S = 60  # debug-friendly floor; production default is 1800
+MAX_INTERVAL_S = 86400
+
 OP_BEGIN = 0x01
 OP_COMMIT = 0x02
 OP_NO_CHANGE = 0x03
@@ -111,8 +114,8 @@ def op_no_change(unix_time: int) -> bytes:
 
 
 def op_set_interval(seconds: int) -> bytes:
-    if not 300 <= seconds <= 86400:
-        raise ValueError("interval must be 300..86400 s")
+    if not MIN_INTERVAL_S <= seconds <= MAX_INTERVAL_S:
+        raise ValueError(f"interval must be {MIN_INTERVAL_S}..{MAX_INTERVAL_S} s")
     return struct.pack("<BI", OP_SET_INTERVAL, seconds)
 
 

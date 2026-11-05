@@ -228,7 +228,7 @@ static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *at
 		}
 		uint32_t s = sys_get_le32(&p[1]);
 
-		if (s < 300 || s > 86400) {
+		if (s < 60 || s > 86400) {
 			return BT_GATT_ERR(ERR_BAD_VALUE);
 		}
 		poll_interval_s = s;
