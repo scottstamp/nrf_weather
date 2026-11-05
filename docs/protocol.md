@@ -56,6 +56,8 @@ First byte is the opcode.
 | `0x03` | NO_CHANGE | u32 unix_time | Nothing to draw. Device records contact time and disconnects. |
 | `0x04` | SET_INTERVAL | u32 seconds | 300 ≤ s ≤ 86400. Takes effect from the next sleep. Not persisted across reset in v1. |
 
+Ordering: `SET_INTERVAL` may be written at any point before the final op (the host sends it right after reading Status); the device drops the link ~150 ms after a successful `COMMIT`/`NO_CHANGE`, so anything after the final op is lost. `displayed_crc == 0` means "no known image" — the host never sends `NO_CHANGE` against 0.
+
 `unix_time` = host's UTC seconds; the device uses it only to track "time since last contact" (stale detection is uptime-based, so it doesn't need a calendar).
 
 Errors are returned as ATT application errors on the Control write:
@@ -68,11 +70,13 @@ Errors are returned as ATT application errors on the Control write:
 | `0x83` | Unknown opcode / bad format / value out of range |
 | `0x84` | Data written out of order (sequence error seen since BEGIN; reported at COMMIT) |
 
-On any error the host may retry once from BEGIN, using write-*with*-response for the Data chunks.
+On any error the host may retry once from BEGIN, using write-*with*-response for the Data chunks (with-response Data writes get `0x82`/`0x84` immediately instead of at COMMIT).
+
+BlueZ/bleak surfaces these as a D-Bus error containing `ATT error: 0x8N` (host maps it in `ble.map_bleak_exception`; to be confirmed on hardware). A device-initiated disconnect racing the COMMIT response is treated as success by the host; if the commit had actually failed, the next poll's `displayed_crc` mismatch causes a resend.
 
 ### Data (write without response)
 
-`u16 offset` + `payload` (≤ ATT_MTU − 5 bytes). Chunks must arrive in order: `offset` must equal the number of bytes received so far since BEGIN; otherwise the device latches error `0x84` and ignores further data until the next BEGIN.
+`u16 offset` + `payload`; the whole write is ≤ ATT_MTU − 3 bytes (so payload ≤ ATT_MTU − 5: 242 B at MTU 247 → 40 writes). Chunks must arrive in order: `offset` must equal the number of bytes received so far since BEGIN; otherwise the device latches error `0x84` and ignores further data until the next BEGIN.
 
 ## Image payload (format 0, 9472 bytes)
 
@@ -82,7 +86,10 @@ Two 1-bpp planes in **panel-native orientation**, concatenated: `BW[4736] || RED
 - Each plane: 296 rows × 16 bytes. Row `y` starts at byte `y * 16`. In each byte, **bit 7 (MSB) is the leftmost pixel** (`x = 8 * byte_index + (7 - bit)`).
 - BW plane: `1 = white`, `0 = black`.
 - RED plane: `1 = red`, `0 = not red`. Red wins over BW where both are set.
-- The host renders landscape 296x128 and rotates into native orientation. Rotation (90° vs 270°, i.e. connector left/right) and red-plane polarity are **host config** (`rotate`, `red_invert`) so the firmware never needs to change for mounting orientation.
+- The host renders landscape 296x128 and rotates into native orientation (`rotate` = 90 or 270, i.e. connector left/right). The firmware's `CONFIG_WX_ROTATION` must match, because the device draws its own splash/OFFLINE/LOW BATTERY overlays in landscape.
+  - rotate=90 (landscape turned 90° CCW): `nx = y`, `ny = 295 - x` → native (0,0) = landscape top-right.
+  - rotate=270 (90° CW): `nx = 127 - y`, `ny = x` → native (0,0) = landscape bottom-left.
+- Payload red polarity is always semantic (`1 = red`). If a panel needs inverted RED RAM, set firmware `CONFIG_WX_EPD_RED_INVERT=y`; leave host `red_invert = false`.
 - CRC: CRC-32/IEEE (same as Python `zlib.crc32`, Zephyr `crc32_ieee()`) over all 9472 bytes.
 
 The firmware writes the BW plane verbatim to SSD1680 RAM `0x24` and the RED plane to RAM `0x26` with data-entry mode `0x03` (X inc, Y inc), RAM X window 0..15, Y window 0..295.
