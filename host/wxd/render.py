@@ -337,12 +337,12 @@ def _draw_big_temp(ctx: _Ctx, x: int, top: int, max_w: int, temp: float | None, 
 
 
 def _wind_text(cur: Current) -> str:
-    """Sustained wind only, e.g. 'Wind: 9 km/h' (direction and gusts intentionally omitted)."""
+    """Sustained wind only, e.g. 'Wind: 9 km' (direction and gusts intentionally omitted)."""
     if cur.wind_kph is None:
         return "Wind: --"
     if cur.wind_kph == 0:
         return "Wind: Calm"
-    return f"Wind: {cur.wind_kph} km/h"
+    return f"Wind: {cur.wind_kph} km"  # "/h" implied (user preference)
 
 
 def _draw_triangle(ctx: _Ctx, x: int, y: int, w: int, up: bool, fill: int = BLACK) -> None:
@@ -488,7 +488,7 @@ def render(
         ff = _font(cfg.font_bold, 16)
         ft = f"Feels {_fmt_t(feels)}"
         fw = ctx.text(left_w, 104, ft, ff, RED if (feels <= -30 or feels >= 35) else BLACK, "r")
-    ctx.fit_text(4, 104, cur.condition or "", False, left_w - 4 - (fw + 10 if show_feels else 0), 17, 13)
+    ctx.fit_text(4, 104, cur.condition or "", True, left_w - 4 - (fw + 10 if show_feels else 0), 17, 13)
 
     # divider + forecast
     if has_fc:
