@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import fcntl
+import os
 import dataclasses
 import json
 import logging
@@ -145,6 +148,26 @@ def _settings(cfg: Config):
 # ---------------------------------------------------------------- commands
 
 
+@contextlib.contextmanager
+def ble_lock(cfg: Config):
+    """Only one wxd process may talk to the device: two would race for the same
+    connection and BlueZ fails both (org.bluez.Error.InProgress)."""
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cfg.cache_dir / "wxd.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = os.pread(fd, 32, 0).decode(errors="replace").strip() or "?"
+            raise SystemExit(f"another wxd (pid {holder}) is using the device; lock {path}")
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
+        yield
+    finally:
+        os.close(fd)
+
+
 async def cmd_run(cfg: Config, once: bool) -> int:
     from .ble import WxBle
 
@@ -273,13 +296,18 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.cmd == "run":
-            return asyncio.run(cmd_run(cfg, once=False))
+            with ble_lock(cfg):
+                return asyncio.run(cmd_run(cfg, once=False))
         if args.cmd == "push":
-            return asyncio.run(cmd_run(cfg, once=True))
+            with ble_lock(cfg):
+                return asyncio.run(cmd_run(cfg, once=True))
         if args.cmd == "preview":
             return cmd_preview(cfg, args.out)
         if args.cmd == "testpattern":
-            return asyncio.run(cmd_testpattern(cfg, args.out))
+            if args.out:
+                return asyncio.run(cmd_testpattern(cfg, args.out))
+            with ble_lock(cfg):
+                return asyncio.run(cmd_testpattern(cfg, None))
         if args.cmd == "scan":
             return asyncio.run(cmd_scan(cfg, args.seconds))
     except KeyboardInterrupt:

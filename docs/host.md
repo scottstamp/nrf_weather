@@ -50,3 +50,7 @@ Behaviour notes:
 - Display never updates but sessions log `no_change ... no payload`: weather fetch is failing; run `wxd preview --out /tmp/x.png -v`.
 - Stale connections: `bluetoothctl disconnect <addr>`, or `sudo systemctl restart bluetooth`.
 - Run `wxd -v push` in a terminal to see debug output while waking the device (reset it, or wait for the next poll).
+
+## Single instance
+
+`wxd run`, `wxd push` and `wxd testpattern` take an exclusive lock on `<cache_dir>/wxd.lock`, which holds the PID. If two processes talk to the device at once, they race for the same connection and BlueZ fails both: `org.bluez.Error.InProgress` and then `br-connection-canceled` every ~2 s. This was seen in bring-up. A second instance now exits with `another wxd (pid N) is using the device`. To push or test by hand, stop the service first (`systemctl stop wxd`), or use `scripts/devcmd.sh poll` to have the running daemon serve the device immediately.
