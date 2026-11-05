@@ -46,7 +46,7 @@ Pixel pitch ≈ 0.227 mm (active area ≈ 67 x 29 mm). Text < 14 px is not reada
 │ ▲ WIND WARNING (red banner, only when an alert is active)  14:00│
 └────────────────────────────────────────────────────────────────┘
 ```
-Red is used for: active warnings, the low-battery icon, and optionally high-impact values (gusts ≥ 70 km/h, POP ≥ 70 %). Final layout is owned by `host/wxd/render.py`; previews committed to `docs/img/`.
+Red is used for: active warnings, the low-battery icon, and optionally high-impact values (POP ≥ 70 %; the gust highlight was dropped when the wind line was simplified to `Wind: N km/h`). Final layout is owned by `host/wxd/render.py`; previews committed to `docs/img/`.
 
 ## 3. Power budget (target ≥ 6 months on a 1000 mAh LiPo)
 

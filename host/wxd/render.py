@@ -54,7 +54,6 @@ class RenderConfig:
     max_periods: int = 3
     pop_notable_pct: int = 40
     pop_red_pct: int = 70
-    gust_red_kph: int = 70
     battery_low_pct: int = 15
     stale_after: timedelta = field(default_factory=lambda: STALE_AFTER)
 
@@ -337,17 +336,13 @@ def _draw_big_temp(ctx: _Ctx, x: int, top: int, max_w: int, temp: float | None, 
     ctx.d.ellipse([rx + th, top + th, rx + ring_d - 1 - th, top + ring_d - 1 - th], fill=WHITE)
 
 
-def _wind_text(cur: Current, cfg: RenderConfig) -> tuple[str, str, bool]:
-    """Returns (main, gust_part, gust_is_red)."""
+def _wind_text(cur: Current) -> str:
+    """Sustained wind only, e.g. 'Wind: 9 km/h' (direction and gusts intentionally omitted)."""
     if cur.wind_kph is None:
-        return "Wind --", "", False
-    if cur.wind_kph == 0 and not cur.wind_gust_kph:
-        return "Calm", "", False
-    main = f"{cur.wind_dir + ' ' if cur.wind_dir else ''}{cur.wind_kph}"
-    g = cur.wind_gust_kph
-    if g and g > cur.wind_kph:
-        return main, f" G{g}", g >= cfg.gust_red_kph
-    return main, "", False
+        return "Wind: --"
+    if cur.wind_kph == 0:
+        return "Wind: Calm"
+    return f"Wind: {cur.wind_kph} km/h"
 
 
 def _draw_triangle(ctx: _Ctx, x: int, y: int, w: int, up: bool, fill: int = BLACK) -> None:
@@ -483,14 +478,7 @@ def render(
     _draw_big_temp(ctx, 4, 4, icon_x - 6, cur.temp_c)
 
     # wind row
-    main, gust, gust_red = _wind_text(cur, cfg)
-    wf = _font(cfg.font_bold, 22)
-    avail = left_w - 4
-    if wf.getlength(main + gust) > avail:
-        wf = _font(cfg.font_bold, 18)
-    w = ctx.text(4, 88, main, wf)
-    if gust:
-        ctx.text(4 + w, 88, gust, wf, RED if gust_red else BLACK)
+    ctx.fit_text(4, 88, _wind_text(cur), True, left_w - 4, 22, 16)
 
     # condition + feels row
     feels = cur.feels_like_c
