@@ -396,16 +396,12 @@ def _draw_forecast(ctx: _Ctx, periods: list[Period], x0: int, y0: int, y1: int) 
             _draw_triangle(ctx, round(tx + tw + 3), y + rh - 3 - 9, 8, p.temp_is_high)
 
 
-def _draw_hilo(ctx: _Ctx, x: int, base: int, hi: int | None, lo: int | None) -> None:
-    """Footer: today's forecast high/low as  ▲6°  ▼-3°  (same triangles as the forecast column)."""
-    f = _font(ctx.cfg.font_bold, 18)
-    tri = 10
-    for i, (v, up) in enumerate(((hi, True), (lo, False))):
-        if i:
-            x += 14
-        _draw_triangle(ctx, x, base - 12, tri, up)
-        x += tri + 3
-        x += round(ctx.text(x, base, f"{_fmt_t(v)}°" if v is not None else "--", f))
+def _draw_hilo(ctx: _Ctx, x: int, base: int, hi: int | None, lo: int | None, max_w: int) -> None:
+    """Footer: today's forecast high/low as  H: 6° | L: -3°  (shrinks to fit)."""
+    def t(v: int | None) -> str:
+        return f"{_fmt_t(v)}°" if v is not None else "--"
+
+    ctx.fit_text(x, base, f"H: {t(hi)} | L: {t(lo)}", True, max_w, 18, 13)
 
 
 def _alert_banner(ctx: _Ctx, alerts: list[Alert], x0: int, y0: int, x1: int, y1: int) -> None:
@@ -516,7 +512,7 @@ def render(
     if model.alerts:
         _alert_banner(ctx, model.alerts, 0, FOOT_Y, right_x - 4, H)
     elif model.today_high_c is not None or model.today_low_c is not None:
-        _draw_hilo(ctx, 4, H - 5, model.today_high_c, model.today_low_c)
+        _draw_hilo(ctx, 4, H - 5, model.today_high_c, model.today_low_c, right_x - 12)
 
     obs = cur.observed_at
     ts = obs.strftime("%H:%M") if obs else "--:--"
