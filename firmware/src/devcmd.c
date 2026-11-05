@@ -1,5 +1,6 @@
 /*
- * Debug-only command console on the USB CDC ACM port (CONFIG_WX_DEVCMD).
+ * Command console on the USB CDC ACM port (CONFIG_WX_DEVCMD), present in
+ * production builds. USB is powered only while a cable is attached.
  *
  * Line commands (terminated by CR or LF):
  *   poll   wake the main loop and poll the host now (no reboot)
@@ -9,7 +10,12 @@
  * Opening the port at 1200 baud also reboots into the bootloader
  * (Arduino-style "1200 bps touch"), e.g. `stty -F /dev/ttyACM0 1200`.
  *
- * Release builds have no USB stack, so none of this is compiled in.
+ * USB power: the board's CDC ACM helper registers the device but does not
+ * enable it (CONFIG_CDC_ACM_SERIAL_ENABLE_AT_BOOT=n), because enabling the nRF
+ * USBD requests the HFXO whether or not VBUS is present. Here USB is enabled
+ * on VBUS_READY and disabled on VBUS_REMOVED, so on battery the USB stack
+ * costs nothing (no clock, no wakeups). Log output written while unplugged
+ * goes into the CDC ring buffer and is dropped when it fills.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +27,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
+#include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/reboot.h>
+#include <zephyr/usb/usbd.h>
 #include <hal/nrf_power.h>
 
 LOG_MODULE_REGISTER(devcmd, LOG_LEVEL_INF);
@@ -91,29 +99,63 @@ static void uart_cb(const struct device *dev, void *user_data)
 	}
 }
 
-/* 1200-baud touch: no line-coding callback is exposed for the boot-time CDC
- * instance, so check the host-set baud rate periodically (debug build only).
- */
-static void baud_check_fn(struct k_timer *t)
+static void usb_msg_cb(struct usbd_context *const ctx, const struct usbd_msg *msg)
 {
-	uint32_t baud = 0;
+	switch (msg->type) {
+	case USBD_MSG_VBUS_READY:
+		if (usbd_enable(ctx) == 0) {
+			LOG_INF("USB cable detected: USB enabled");
+		}
+		break;
+	case USBD_MSG_VBUS_REMOVED:
+		(void)usbd_disable(ctx); /* releases the HFXO */
+		break;
+	case USBD_MSG_CDC_ACM_LINE_CODING: {
+		/* 1200-baud touch: host opened the port at 1200 bps. */
+		uint32_t baud = 0;
 
-	ARG_UNUSED(t);
-	if (uart_line_ctrl_get(uart, UART_LINE_CTRL_BAUD_RATE, &baud) == 0 && baud == 1200) {
-		nrf_power_gpregret_set(NRF_POWER, 0, DFU_MAGIC_UF2_RESET);
-		sys_reboot(SYS_REBOOT_COLD);
+		if (uart_line_ctrl_get(msg->dev, UART_LINE_CTRL_BAUD_RATE, &baud) == 0 &&
+		    baud == 1200) {
+			reboot_to_bootloader();
+		}
+		break;
+	}
+	default:
+		break;
 	}
 }
-static K_TIMER_DEFINE(baud_timer, baud_check_fn, NULL);
+
+static int usb_power_init(void)
+{
+	int n = 0;
+
+	STRUCT_SECTION_FOREACH(usbd_context, ctx) {
+		int err = usbd_msg_register_cb(ctx, usb_msg_cb);
+
+		if (err) {
+			LOG_ERR("usbd msg cb %d", err);
+			continue;
+		}
+		n++;
+		/*
+		 * A cable present at boot may have raised VBUS_READY before the
+		 * callback existed: check the USB regulator status directly.
+		 */
+		if (nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {
+			(void)usbd_enable(ctx);
+		}
+	}
+	return n ? 0 : -ENODEV;
+}
 
 int devcmd_init(void)
 {
 	if (!device_is_ready(uart)) {
 		return -ENODEV;
 	}
+	(void)usb_power_init();
 	uart_irq_callback_set(uart, uart_cb);
 	uart_irq_rx_enable(uart);
-	k_timer_start(&baud_timer, K_MSEC(250), K_MSEC(250));
 	LOG_INF("dev console: poll | reset | boot | help");
 	return 0;
 }

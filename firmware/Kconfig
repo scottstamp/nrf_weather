@@ -71,7 +71,8 @@ config WX_DEVCMD
 	depends on SERIAL && UART_INTERRUPT_DRIVEN && UART_LINE_CTRL
 	help
 	  Line commands poll / reset / boot / help, plus 1200-baud touch to
-	  enter the UF2 bootloader. Debug builds only (needs the USB stack).
+	  enter the UF2 bootloader. Also owns USB power management: the USB
+	  device is enabled only while VBUS is present.
 
 endmenu
 

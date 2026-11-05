@@ -53,3 +53,20 @@
 **Host debounce:** lowered from 60 s to 20 s. The 60 s value blocked polls in the 60 s debug cadence.
 
 **Determinism:** the same weather input gives the same CRC (`bbd89302`) across daemon restarts and reboots.
+
+## USB power finding (2026-11-05)
+
+The boot-time CDC ACM helper calls `usbd_enable()` unconditionally. In `drivers/usb/udc/udc_nrf.c`, `udc_nrf_enable()` does `onoff_request(hfxo_mgr)` and enables USBD whether or not VBUS is present; VBUS only gates the D+ pull-up (`USB_EVT_READY`). So every debug build flashed during bring-up ran the HFXO continuously. That costs roughly 250 µA or more, about 100 times the sleep target, if used on battery.
+
+Fix: set `CDC_ACM_SERIAL_ENABLE_AT_BOOT=n`, and have the app enable and disable USB on VBUS messages. This is now in the production build.
+
+Verified on hardware:
+
+- With the cable present at boot, the device enumerates (the boot-race path works).
+- `help` answers.
+- The 1200-baud touch reaches the bootloader in 4 s.
+
+Still to verify:
+
+- **Unplug and replug:** the log should show `USB cable detected: USB enabled`.
+- **Sleep current on battery:** measure with a PPK2.
