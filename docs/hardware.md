@@ -33,7 +33,7 @@ The SSD1680 is write-only here, so MISO isn't used. Run SPI at 4 MHz. The contro
 - **Battery sense**: the nice!nano runs the nRF52840 in high-voltage mode with the cell on VDDH. The SAADC samples the internal `VDDH/5` input once per poll, so no divider and no pin are needed.
 - **32.768 kHz crystal**: the build assumes it is present (nice!nano v2 has one). For clones without it, build with `-DEXTRA_CONF_FILE=rc_lfclk.conf`. If the crystal is missing and XTAL is selected, Bluetooth never starts.
 - **DCDC**: off by default. It needs the DCDC inductors on the board, and enabling it on a board without them stops the chip from running. It only saves current while active (radio, SPI), not in sleep, so the gain here is small. It's a Phase 5 item, to check against the board schematic.
-- **nice!nano LED / charger**: the blue charge LED only lights while charging. The user LED (P0.15) is not used.
+- **nice!nano LED / charger**: the blue charge LED only lights while charging. The user LED (P0.15) is used only for a 50 ms blink acknowledging a poll-button press; otherwise it is disconnected.
 
 ## Poll button
 
