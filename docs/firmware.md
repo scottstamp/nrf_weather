@@ -23,7 +23,7 @@ Output: `build/firmware/zephyr/zephyr.uf2`. NCS builds with sysbuild by default,
 
 To flash, double-tap RESET on the nice!nano. A `NICENANO` USB drive appears; copy `zephyr.uf2` onto it. The board reboots into the app.
 
-Debug build: logs go to the USB CDC ACM console, e.g. `screen /dev/ttyACM0`. It uses the production cadence (30 min poll, 5 min retry, 3 h stale). Use `scripts/devcmd.sh poll` or the poll button to poll right away.
+Debug build: logs go to the USB CDC ACM console, e.g. `screen /dev/ttyACM0`. It uses the production cadence (10 min poll, 5 min retry, 3 h stale). Use `scripts/devcmd.sh poll` or the poll button to poll right away.
 
 **Deployment:** flash the production build. On this board (no SoftDevice) that's `west build -b promicro_nrf52840/nrf52840/uf2 -d build-release-nosd . -- -DEXTRA_DTC_OVERLAY_FILE=boards/uf2_no_softdevice.overlay`. It has the same console and `scripts/flash.sh` workflow as debug. The only difference is that debug adds `CONFIG_ASSERT=y` and halts on fatal errors instead of resetting.
 
@@ -141,7 +141,7 @@ Measured numbers belong here once a PPK2 run is done (Phase 5).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
-| `WX_POLL_INTERVAL_S` | 1800 | poll cadence (host can override) |
+| `WX_POLL_INTERVAL_S` | 600 | poll cadence (host can override) |
 | `WX_RETRY_INTERVAL_S` | 300 | one early retry after a failed poll |
 | `WX_ADV_WINDOW_S` | 30 | advertising window per poll |
 | `WX_SESSION_TIMEOUT_S` | 20 | GATT inactivity timeout |

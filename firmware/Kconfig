@@ -5,7 +5,7 @@ menu "WxPaper"
 
 config WX_POLL_INTERVAL_S
 	int "Default poll interval (s)"
-	default 1800
+	default 600
 	range 60 86400
 	help
 	  Time between wake-ups that advertise for new data. The host can

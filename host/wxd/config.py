@@ -14,7 +14,7 @@ from typing import Any
 class BleConfig:
     device_address: str | None = None
     adapter: str = "hci0"
-    poll_interval_s: int = 1800
+    poll_interval_s: int = 600
 
 
 @dataclass

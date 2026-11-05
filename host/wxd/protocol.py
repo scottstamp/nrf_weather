@@ -22,7 +22,7 @@ PLANE_BYTES = ROW_BYTES * NATIVE_H  # 4736
 PAYLOAD_BYTES = 2 * PLANE_BYTES  # 9472
 FORMAT_RAW = 0
 
-MIN_INTERVAL_S = 60  # debug-friendly floor; production default is 1800
+MIN_INTERVAL_S = 60  # debug-friendly floor; production default is 600
 MAX_INTERVAL_S = 86400
 
 OP_BEGIN = 0x01

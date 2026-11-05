@@ -12,7 +12,7 @@ Battery-powered windowsill weather display for **A1K 1E1 (St. John's area, Newfo
 ```
  ┌──────────── Linux host (always on) ─────────────┐         ┌──────── nice!nano + e-paper ────────┐
  │ weather.py  ── ECCC (primary) / Open-Meteo (fb) │         │ sleeps in System ON idle (~3 µA)    │
- │     │ WeatherModel                               │  BLE    │ every 30 min: wake, advertise ≤30 s │
+ │     │ WeatherModel                               │  BLE    │ every 10 min: wake, advertise ≤30 s │
  │ render.py  ── 296x128 B/W/R image (PIL)         │◀──────▶│ host connects, reads Status,        │
  │     │ two 1-bpp planes (BW + RED), CRC32         │         │ writes image (or NO_CHANGE)         │
  │ ble.py     ── passive scan, connect, upload     │         │ disconnect → power panel, refresh,  │
@@ -25,7 +25,7 @@ Battery-powered windowsill weather display for **A1K 1E1 (St. John's area, Newfo
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D1 | **Host renders the full image**; device is a "smart frame". | Rich fonts/icons without bloating firmware; layout iterated on PC with PNG previews (no hardware needed); firmware small and robust. 9472 bytes per frame is < 1 s over BLE. |
-| D2 | **Device = BLE peripheral that advertises only when it wants data** ("poll" = 30 s advertising window every 30 min). Host scans continuously. | Advertising is far cheaper than scanning on the battery side; the mains-powered host does the expensive listening. |
+| D2 | **Device = BLE peripheral that advertises only when it wants data** ("poll" = 30 s advertising window every 10 min). Host scans continuously. | Advertising is far cheaper than scanning on the battery side; the mains-powered host does the expensive listening. |
 | D3 | **Custom SSD1680 tri-color driver** in the app instead of Zephyr's `ssd16xx`. | Zephyr's `ssd16xx` driver is mono-only (`PIXEL_FORMAT_MONO10`) and uses the RED RAM (0x26) as the partial-refresh "old" buffer, so it cannot drive the red plane. |
 | D4 | **Panel power is switched off between updates** using the nice!nano's VCC switch (P0.13, high = on), with all panel GPIOs set to disconnected while off. | Removes breakout quiescent current (booster, regulator, level shifter); e-paper is bistable. |
 | D5 | Image only re-sent/refreshed when its CRC32 differs from what the device shows. Image shows **observation time** (hourly), not fetch time. | A tri-color full refresh is ~15–25 s of panel current and visible flashing; avoid needless refreshes (~24/day max). |
@@ -101,7 +101,7 @@ State machine in the main thread (no extra threads besides BT host):
 2. **POLL**: read battery (SAADC VDDH/5), start connectable advertising (100 ms, name `WxPaper`, 128-bit service UUID). Wait ≤ 30 s for connection + transfer complete (semaphore).
 3. **RX**: host reads Status, then either `NO_CHANGE` or `BEGIN` → image chunks → `COMMIT` (CRC32 check). Device disconnects after the final op (or on 20 s inactivity).
 4. **REFRESH** (only if a new image was committed, or a stale/low-battery overlay must appear): panel power on → HW reset → init → write BW RAM (0x24) + RED RAM (0x26) → full update (0x22=0xF7, 0x20) → wait BUSY (timeout 40 s) → deep sleep (0x10=0x01) → power off, pins disconnected.
-5. **SLEEP**: `k_sleep()` until next poll. Interval 30 min (host can override); after a failed poll, one retry after 5 min.
+5. **SLEEP**: `k_sleep()` until next poll. Interval 10 min (host can override); after a failed poll, one retry after 5 min.
    - After `STALE_AFTER` (3 h) without host contact: overlay a red "no data" badge and refresh once.
    - Battery < 3.40 V: add low-battery badge; < 3.30 V: stop refreshing, poll every 2 h.
 

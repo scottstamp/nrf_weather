@@ -260,7 +260,7 @@ async def run_session(
 class BleSettings:
     device_address: str | None = None
     adapter: str | None = "hci0"
-    poll_interval_s: int | None = 1800
+    poll_interval_s: int | None = 600
     rescan_interval_s: float = RESCAN_INTERVAL_S
     success_debounce_s: float = SUCCESS_DEBOUNCE_S
     connect_timeout_s: float = CONNECT_TIMEOUT_S

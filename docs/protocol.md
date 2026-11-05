@@ -6,7 +6,7 @@ All multi-byte integers are **little-endian**. Version byte = `1`.
 ## Roles & timing
 
 - Device: BLE **peripheral**, GATT server. Host: **central**, GATT client.
-- Device sleeps; every poll interval (default 1800 s) it advertises **connectable, 100 ms interval, for ≤ 30 s**.
+- Device sleeps; every poll interval (default 600 s) it advertises **connectable, 100 ms interval, for ≤ 30 s**.
 - Host scans continuously (passive is enough; name + UUID are in the primary ADV PDU), connects as soon as it sees the device.
 - After connect the host should finish within **20 s**. The device disconnects on: successful `COMMIT`, `NO_CHANGE`, or 20 s with no GATT activity.
 - Device requests connection interval 7.5–15 ms, latency 0, supervision timeout 4 s, 2M PHY, data length 251. The host should exchange MTU (BlueZ does this automatically; aim for 247).
@@ -54,7 +54,7 @@ First byte is the opcode.
 | `0x01` | BEGIN | u32 total_len, u32 crc32, u8 format, u32 unix_time | Start an image transfer. `total_len` must be 9472 and `format` must be 0 (raw planes). Resets receive offset to 0. |
 | `0x02` | COMMIT | — | Validate length + CRC. On success: device disconnects, then does a full panel refresh. |
 | `0x03` | NO_CHANGE | u32 unix_time | Nothing to draw. Device records contact time and disconnects. |
-| `0x04` | SET_INTERVAL | u32 seconds | 60 ≤ s ≤ 86400 (60 s is for debugging; production 1800). Takes effect from the next sleep. Not persisted across reset in v1. |
+| `0x04` | SET_INTERVAL | u32 seconds | 60 ≤ s ≤ 86400 (60 s is for debugging; production 600). Takes effect from the next sleep. Not persisted across reset in v1. |
 
 Ordering: `SET_INTERVAL` may be written at any point before the final op (the host sends it right after reading Status); the device drops the link ~150 ms after a successful `COMMIT`/`NO_CHANGE`, so anything after the final op is lost. `displayed_crc == 0` means "no known image" — the host never sends `NO_CHANGE` against 0.
 
