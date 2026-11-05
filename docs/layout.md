@@ -16,7 +16,7 @@ Renderer: `host/wxd/render.py`. Previews: `python -m wxd.render` (writes `host/o
 | Condition | baseline y 104, x 4.. | Bold 17 px, shrinks to 13 px to fit beside "Feels", then ellipsis |
 | Feels-like | baseline y 104, right-aligned to x 200 | Bold 16 px |
 | Forecast column | x 206..296, 3 rows of 34 px, divider at x 202 | 28 px icon, name bold 14 px (shrinks to 10), temp bold 18 px with triangle (up = high, down = low), POP in bold 13 px on the name line when >= 40 % |
-| Footer | y 106..128 | Alert banner (left), else today's forecast high/low as `H: 6° | L: 3°` (bold 18 px, shrinks to 13 px to fit; `--` if missing); observation time (regular 14 px), hourglass if stale, battery 24x12 |
+| Footer | y 106..128 | Alert banner (left), else today's forecast high/low as `H: 6° | L: 3°` (bold 18 px, shrinks to 13 px to fit; `--` if missing); observation time, 12-hour `9:30 AM` (regular 14 px, drawn first; the left element ends 4 px before it), hourglass if stale, battery 24x12 |
 
 ## Color rules
 

@@ -495,15 +495,10 @@ def render(
         d.line([COL_X - 4, 4, COL_X - 4, FOOT_Y - 4], fill=BLACK)
         _draw_forecast(ctx, model.periods, COL_X, 2, FOOT_Y - 2)
 
-    # footer: alert banner, else today's high/low; right: obs time, stale marker, battery
-    right_x = COL_X - 2
-    if model.alerts:
-        _alert_banner(ctx, model.alerts, 0, FOOT_Y, right_x - 4, H)
-    elif model.today_high_c is not None or model.today_low_c is not None:
-        _draw_hilo(ctx, 4, H - 5, model.today_high_c, model.today_low_c, right_x - 12)
-
+    # footer, right side first: obs time (12 h, AM/PM), stale marker, battery.
+    # The left element (alert banner or high/low) then ends 4 px before it.
     obs = cur.observed_at
-    ts = obs.strftime("%H:%M") if obs else "--:--"
+    ts = f"{obs.hour % 12 or 12}:{obs:%M} {'AM' if obs.hour < 12 else 'PM'}" if obs else "--:--"
     stale = _is_stale(model, now, cfg)
     tf = _font(cfg.font_regular, 14)
     bx = W - 4
@@ -515,8 +510,18 @@ def render(
         _draw_battery(ctx, bx, H - 6 - 12 + 1, pct, low)
         bx -= 6
     tw = ctx.text(bx, H - 6, ts, tf, BLACK, "r")
+    right_edge = bx - tw
     if stale:
-        _draw_hourglass(ctx, round(bx - tw - 12), H - 6 - 11)
+        hx = round(bx - tw - 12)
+        _draw_hourglass(ctx, hx, H - 6 - 11)
+        right_edge = hx
+    left_end = min(COL_X - 6, round(right_edge) - 4)
+
+    # left: alert banner, else today's high/low
+    if model.alerts:
+        _alert_banner(ctx, model.alerts, 0, FOOT_Y, left_end, H)
+    elif model.today_high_c is not None or model.today_low_c is not None:
+        _draw_hilo(ctx, 4, H - 5, model.today_high_c, model.today_low_c, left_end - 8)
     return ctx.img
 
 
