@@ -67,28 +67,28 @@ This matches the widely used 2.9" B/W/R SSD1680 sequence (GxEPD2 `GxEPD2_290_C90
 ## State machine
 
 ```
-boot ─► splash "WXPAPER / WAITING FOR HOST" (skipped if battery critical)
+boot ─► splash "WXPAPER / WAITING FOR HOST" (only on power-on/reset-pin; skipped after WDT/fault/software reset or if battery critical)
   │
   └─► loop:
         read battery (VDDH)                      ← status flags LOW_BATT
         wx_poll(): advertise ≤ 30 s, serve one session
           NEW_IMAGE  → copy to fb, need refresh, contact
           NO_CHANGE  → contact
-          NO_CONTACT → if no contact for 3 h and not yet shown: OFFLINE overlay + refresh
+          NO_CONTACT → if no contact for max(3 h, 2×interval+5 min) and not yet shown: OFFLINE overlay + refresh
         battery < 3.30 V → LOW BATTERY overlay once, then no more refreshes, poll every 2 h
         refresh panel if needed
-        sleep: interval (host may set 300..86400 s), or 5 min once after a failed poll
+        sleep: interval (host may set 300..86400 s), or 5 min once per outage after a failed poll
               (chunked to feed the watchdog)
 ```
 
 - **Overlays**: any device overlay sets `displayed_crc = 0`, so the host's next image is always accepted and replaces it.
 - **Watchdog**: 3 h, keeps counting during System ON idle. The main loop feeds it every ≤ 1 h of sleep and once per loop.
-- **Failure handling**: BT init failure → reboot after 60 s. Fatal error → reset (`CONFIG_RESET_ON_FATAL_ERROR`). A BUSY timeout sets `REFRESH_FAILED` in Status, and the next image retries.
+- **Failure handling**: BT init failure → reboot after 60 s. Fatal error → reset (`CONFIG_RESET_ON_FATAL_ERROR`). A BUSY timeout waits up to 15 s more before cutting panel power, sets `REFRESH_FAILED` and `displayed_crc = 0` so the host resends. An image accepted but not drawn (critical battery) also reports `displayed_crc = 0`.
 
 ## Power design
 
 - **Release build**: no UART, USB stack, logging or console. UART0, I2C0/1, PWM0 and 802.15.4 are disabled in DT.
-- **SPIM2 and SAADC** use device runtime PM (`zephyr,pm-device-runtime-auto`). They are suspended outside transfers, with SPIM pins in the `low-power-enable` (disconnected) sleep state.
+- **SPIM2** is held resumed for the duration of `epd_show()` (so SCK/MOSI never float while CS is low) and is otherwise suspended. **SPIM2 and SAADC** use device runtime PM (`zephyr,pm-device-runtime-auto`). They are suspended outside transfers, with SPIM pins in the `low-power-enable` (disconnected) sleep state.
 - **Panel**: powered only during a refresh. All panel lines are disconnected otherwise (see `hardware.md`).
 - **Sleep**: plain `k_sleep()`. Zephyr idles in System ON with the RTC running, about 2–3 µA for the SoC. System OFF is not used, because it needs a GPIO/NFC/LPCOMP wake source and loses RAM.
 - **BLE**:

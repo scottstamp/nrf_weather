@@ -75,6 +75,24 @@ Panel refresh dominates → D5 matters most. Measure with a PPK2 in Phase 5 and 
 | 5 | Power measurement (PPK2), DCDC enablement if inductor present, sleep current verification | — | — |
 | 6 | Hardening: authentication (bonding or HMAC), OTA/DFU over BLE (optional), host watchdog | — | — |
 
+### Status (2026-11-05)
+
+- Phase 0 ✔. Phase 1a–1d ✔ — all code written; host tests pass (`pytest host/tests`), firmware release + debug builds clean.
+- Live check ✔: `wxd preview` renders real ECCC data for nl-24.
+- Phase 2: firmware reviewed against protocol / FakeDevice (findings applied, see git log). No hardware yet, so the BLE link, panel sequence and power are **unverified on a real device**.
+- Location finding: A1K = **Torbay**; ECCC has no Torbay page → `nl-24` St. John's (CYYT obs); Open-Meteo fallback uses 47.65, −52.73.
+- Next: Phase 3 bring-up checklist below.
+
+### Phase 3 bring-up checklist
+
+1. Wire per `hardware.md`; flash the **debug** UF2; open `/dev/ttyACM0`.
+2. Splash appears upright? If upside-down, flip `CONFIG_WX_ROTATION` + host `rotate`. Red bar at top red (not inverted)? Else `CONFIG_WX_EPD_RED_INVERT=y`.
+3. Note "refresh done in N ms" in log (expect 15–25 s). BUSY timeout → check BUSY wiring/polarity.
+4. On host: `wxd scan` sees `WxPaper`; `wxd -v push` completes; log shows COMMIT ok; panel shows weather.
+5. Leave `wxd run` going; confirm NO_CHANGE between hourly observation updates.
+6. Stop host for > 20 min (debug stale threshold) → OFFLINE badge appears; restart → cleared.
+7. Flash release UF2, measure sleep current (target < 10 µA board-level, panel off).
+
 ## 5. Firmware design summary (details in `firmware.md`)
 
 State machine in the main thread (no extra threads besides BT host):

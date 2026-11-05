@@ -16,6 +16,7 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/pm/device_runtime.h>
 
 LOG_MODULE_REGISTER(epd, LOG_LEVEL_INF);
 
@@ -214,6 +215,13 @@ int epd_show(const uint8_t *bw, const uint8_t *red)
 	int64_t t0 = k_uptime_get();
 	int err;
 
+	/*
+	 * Hold SPIM resumed for the whole update. Otherwise runtime PM suspends
+	 * it after every chunk and SCK/MOSI float (sleep state = disconnected)
+	 * while CS is asserted, which could clock in noise.
+	 */
+	(void)pm_device_runtime_get(spi_dev);
+
 	err = epd_power_up();
 	err = err ?: epd_controller_init();
 	err = err ?: epd_set_counter();
@@ -229,9 +237,15 @@ int epd_show(const uint8_t *bw, const uint8_t *red)
 		err = epd_wait_busy(CONFIG_WX_EPD_BUSY_TIMEOUT_MS);
 	}
 
+	if (err == -ETIMEDOUT) {
+		/* Don't yank power mid-waveform if the panel is merely slow (cold). */
+		(void)epd_wait_busy(15000);
+	}
+
 	/* Deep sleep mode 1 (RAM retained) even after an error, then power off. */
 	(void)epd_cmd1(CMD_DEEP_SLEEP, 0x01);
 	k_msleep(2);
+	(void)pm_device_runtime_put(spi_dev);
 	epd_pins_release();
 
 	LOG_INF("refresh %s in %lld ms", err ? "FAILED" : "done", k_uptime_get() - t0);

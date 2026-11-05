@@ -74,7 +74,8 @@ static uint32_t committed_crc;
 static struct wx_status status;
 static uint32_t poll_interval_s = CONFIG_WX_POLL_INTERVAL_S;
 
-static struct bt_conn *cur_conn;
+static struct bt_conn *cur_conn; /* guarded by conn_lock */
+static struct k_spinlock conn_lock;
 static enum wx_poll_result session_result;
 static K_SEM_DEFINE(link_down, 0, 1);
 
@@ -82,12 +83,43 @@ static void disconnect_work_fn(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(disconnect_work, disconnect_work_fn);
 static K_WORK_DELAYABLE_DEFINE(inactivity_work, disconnect_work_fn);
 
+/* Returns a new reference to the current connection (or NULL). */
+static struct bt_conn *conn_get(void)
+{
+	struct bt_conn *c = NULL;
+	k_spinlock_key_t key = k_spin_lock(&conn_lock);
+
+	if (cur_conn) {
+		c = bt_conn_ref(cur_conn);
+	}
+	k_spin_unlock(&conn_lock, key);
+	return c;
+}
+
+static void conn_drop(void)
+{
+	struct bt_conn *c = conn_get();
+
+	if (c) {
+		(void)bt_conn_disconnect(c, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		bt_conn_unref(c);
+	}
+}
+
+static bool conn_active(void)
+{
+	struct bt_conn *c = conn_get();
+
+	if (c) {
+		bt_conn_unref(c);
+	}
+	return c != NULL;
+}
+
 static void disconnect_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	if (cur_conn) {
-		(void)bt_conn_disconnect(cur_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	}
+	conn_drop();
 }
 
 static void touch(void)
@@ -212,14 +244,19 @@ static ssize_t data_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			  uint16_t len, uint16_t offset, uint8_t flags)
 {
 	const uint8_t *p = buf;
-	bool with_rsp = !(flags & BT_GATT_WRITE_FLAG_CMD);
 
+	/*
+	 * Per protocol.md, Data writes never fail (with or without response):
+	 * problems are latched and reported by COMMIT (0x82 no BEGIN, 0x84
+	 * sequence/overflow), so both write types behave identically.
+	 */
 	touch();
-	if (offset != 0 || len < 2) {
-		return with_rsp ? BT_GATT_ERR(ERR_BAD_LENGTH) : len;
-	}
 	if (!rx_begun) {
-		return with_rsp ? BT_GATT_ERR(ERR_NO_BEGIN) : len;
+		return len; /* COMMIT will answer 0x82 */
+	}
+	if (offset != 0 || len < 2) {
+		rx_seq_err = true;
+		return len;
 	}
 
 	uint16_t off = sys_get_le16(p);
@@ -227,7 +264,7 @@ static ssize_t data_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 
 	if (rx_seq_err || off != rx_len || rx_len + n > sizeof(rx_buf)) {
 		rx_seq_err = true;
-		return with_rsp ? BT_GATT_ERR(ERR_SEQUENCE) : len;
+		return len;
 	}
 	memcpy(&rx_buf[rx_len], &p[2], n);
 	rx_len += n;
@@ -251,9 +288,14 @@ static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
 		LOG_WRN("connect failed 0x%02x", err);
+		k_sem_give(&link_down); /* wx_poll re-arms advertising */
 		return;
 	}
+
+	k_spinlock_key_t key = k_spin_lock(&conn_lock);
+
 	cur_conn = bt_conn_ref(conn);
+	k_spin_unlock(&conn_lock, key);
 	rx_begun = false;
 	touch();
 	LOG_INF("connected");
@@ -271,9 +313,14 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	LOG_INF("disconnected 0x%02x", reason);
 	k_work_cancel_delayable(&inactivity_work);
 	k_work_cancel_delayable(&disconnect_work);
-	if (cur_conn) {
-		bt_conn_unref(cur_conn);
-		cur_conn = NULL;
+
+	k_spinlock_key_t key = k_spin_lock(&conn_lock);
+	struct bt_conn *old = cur_conn;
+
+	cur_conn = NULL;
+	k_spin_unlock(&conn_lock, key);
+	if (old) {
+		bt_conn_unref(old);
 	}
 	rx_begun = false;
 	k_sem_give(&link_down);
@@ -337,6 +384,11 @@ enum wx_poll_result wx_poll(void)
 
 		int err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), NULL, 0);
 
+		if (err == -ENOMEM || err == -EALREADY || err == -EAGAIN) {
+			/* Previous connection object not recycled yet. */
+			k_msleep(50);
+			continue;
+		}
 		if (err) {
 			LOG_ERR("adv start %d", err);
 			break;
@@ -348,7 +400,9 @@ enum wx_poll_result wx_poll(void)
 
 		/* Window over. Connectable adv stops by itself on connect. */
 		(void)bt_le_adv_stop();
-		if (cur_conn) {
+		/* A connect event may be in flight right at the deadline. */
+		k_msleep(100);
+		if (conn_active()) {
 			/* Session in progress: the inactivity timer bounds this. */
 			(void)k_sem_take(&link_down,
 					 K_SECONDS(CONFIG_WX_SESSION_TIMEOUT_S + 5));
@@ -357,9 +411,10 @@ enum wx_poll_result wx_poll(void)
 	}
 
 	(void)bt_le_adv_stop();
-	if (cur_conn) {
-		(void)bt_conn_disconnect(cur_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	if (conn_active()) {
+		conn_drop();
 		(void)k_sem_take(&link_down, K_SECONDS(5));
 	}
+	/* Results after this point would be lost; take a snapshot now. */
 	return session_result;
 }

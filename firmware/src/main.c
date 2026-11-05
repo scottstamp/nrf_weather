@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -34,9 +35,16 @@ static void wdt_start(void)
 	};
 
 	wdt_channel = wdt_install_timeout(wdt, &cfg);
-	if (wdt_channel >= 0) {
-		/* Keep counting while the CPU sleeps: catches a hung main loop. */
-		(void)wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
+	if (wdt_channel < 0) {
+		LOG_ERR("wdt install %d", wdt_channel);
+		return;
+	}
+	/* Keep counting while the CPU sleeps: catches a hung main loop. */
+	int err = wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
+
+	if (err) {
+		LOG_ERR("wdt setup %d", err);
+		wdt_channel = -1;
 	}
 }
 
@@ -67,11 +75,31 @@ static int refresh(struct wx_status *st)
 
 	st->refresh_count++;
 	if (err) {
+		/* Panel content unknown: make the host resend on the next poll. */
 		st->flags |= WX_FLAG_REFRESH_FAILED;
+		st->displayed_crc = 0;
 	} else {
 		st->flags &= ~WX_FLAG_REFRESH_FAILED;
 	}
 	return err;
+}
+
+/*
+ * The splash costs a full refresh; only draw it when a person caused the
+ * reset (power-on, reset button), not after a watchdog/fault/software reset,
+ * so a crash loop doesn't keep flashing the panel and draining the cell.
+ */
+static bool want_splash(void)
+{
+	uint32_t cause = 0;
+
+	if (hwinfo_get_reset_cause(&cause) != 0) {
+		return true;
+	}
+	(void)hwinfo_clear_reset_cause();
+	/* nRF reports a plain power-on as cause 0; RESETREAS bits accumulate until cleared. */
+	return (cause & RESET_PIN) ||
+	       !(cause & (RESET_WATCHDOG | RESET_SOFTWARE | RESET_CPU_LOCKUP));
 }
 
 int main(void)
@@ -105,7 +133,7 @@ int main(void)
 
 	int mv = battery_read_mv();
 
-	if (mv <= 0 || mv >= CONFIG_WX_CRIT_BATT_MV) {
+	if (want_splash() && (mv <= 0 || mv >= CONFIG_WX_CRIT_BATT_MV)) {
 		fb_draw_splash(fb, "WXPAPER", "WAITING FOR HOST");
 		(void)refresh(&st);
 	}
@@ -143,8 +171,12 @@ int main(void)
 			last_contact_ms = now;
 			retry_pending = false;
 			break;
-		case WX_POLL_NO_CONTACT:
-			if ((now - last_contact_ms) / 1000 >= CONFIG_WX_STALE_AFTER_S &&
+		case WX_POLL_NO_CONTACT: {
+			/* Never call it stale before at least two polls were missed. */
+			int64_t stale_s = MAX((int64_t)CONFIG_WX_STALE_AFTER_S,
+					      2 * (int64_t)wx_poll_interval_s() + 300);
+
+			if ((now - last_contact_ms) / 1000 >= stale_s &&
 			    !(st.flags & (WX_FLAG_STALE_SHOWN | WX_FLAG_NO_IMAGE))) {
 				fb_draw_offline(fb);
 				st.displayed_crc = 0; /* panel no longer matches any host image */
@@ -152,6 +184,7 @@ int main(void)
 				need_refresh = true;
 			}
 			break;
+		}
 		}
 
 		if (crit) {
@@ -164,8 +197,10 @@ int main(void)
 				st.displayed_crc = 0;
 				need_refresh = true;
 				crit_shown = true;
-			} else {
+			} else if (need_refresh) {
+				/* New image accepted but not drawn: don't claim it's shown. */
 				need_refresh = false;
+				st.displayed_crc = 0;
 			}
 		}
 
@@ -178,9 +213,8 @@ int main(void)
 		if (res == WX_POLL_NO_CONTACT && !retry_pending) {
 			retry_pending = true;
 			interval = MIN(interval, CONFIG_WX_RETRY_INTERVAL_S);
-		} else if (res == WX_POLL_NO_CONTACT) {
-			retry_pending = false; /* back to the normal cadence */
 		}
+		/* retry_pending is cleared on the next contact: one early retry per outage. */
 
 		sleep_s(interval);
 	}

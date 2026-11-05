@@ -70,7 +70,7 @@ Errors are returned as ATT application errors on the Control write:
 | `0x83` | Unknown opcode / bad format / value out of range |
 | `0x84` | Data written out of order (sequence error seen since BEGIN; reported at COMMIT) |
 
-On any error the host may retry once from BEGIN, using write-*with*-response for the Data chunks (with-response Data writes get `0x82`/`0x84` immediately instead of at COMMIT).
+On any error the host may retry once from BEGIN, using write-*with*-response for the Data chunks. Data writes never fail, with or without response: problems (no BEGIN, out-of-order offset, overflow past 9472) are latched and reported by COMMIT as `0x82` / `0x84`.
 
 BlueZ/bleak surfaces these as a D-Bus error containing `ATT error: 0x8N` (host maps it in `ble.map_bleak_exception`; to be confirmed on hardware). A device-initiated disconnect racing the COMMIT response is treated as success by the host; if the commit had actually failed, the next poll's `displayed_crc` mismatch causes a resend.
 
