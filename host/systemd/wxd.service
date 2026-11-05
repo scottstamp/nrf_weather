@@ -1,0 +1,23 @@
+[Unit]
+Description=wxd e-paper weather display daemon
+After=network-online.target bluetooth.target
+Wants=network-online.target bluetooth.target
+
+[Service]
+Type=simple
+User=wxd
+Group=wxd
+SupplementaryGroups=bluetooth
+# Adjust to your install location.
+ExecStart=/opt/wxd/venv/bin/wxd --config /etc/wxd/config.toml run
+Restart=always
+RestartSec=5
+CacheDirectory=wxd
+Environment=XDG_CACHE_HOME=/var/cache
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

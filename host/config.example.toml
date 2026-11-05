@@ -1,0 +1,22 @@
+# wxd configuration. Copy to ~/.config/wxd/config.toml or /etc/wxd/config.toml.
+
+# Cache directory for the last good weather model (default: $XDG_CACHE_HOME/wxd).
+# cache_dir = "/var/lib/wxd"
+
+[location]
+# Passed through to weather.WeatherConfig (unknown keys are ignored).
+lat = 47.5615
+lon = -52.7126
+name = "St. John's"
+
+[weather]
+refresh_s = 600        # background refresh period (>= 30)
+
+[render]
+rotate = 90            # 90 or 270, depending on which side the panel connector is on
+red_invert = false     # flip red plane polarity
+
+[ble]
+# device_address = "AA:BB:CC:DD:EE:FF"   # optional: pin one device (default: match name/service UUID)
+adapter = "hci0"
+poll_interval_s = 1800                    # sent via SET_INTERVAL if device differs (300..86400)
