@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+description: |
+  SSD1680 black/white/red e-paper panel driven directly by the app (not
+  via Zephyr's mono-only ssd16xx driver). Chip select is a plain GPIO so
+  every line to the panel can be disconnected while panel power is off.
+
+compatible: "wx,ssd1680-bwr"
+
+include: base.yaml
+
+properties:
+  spi-bus:
+    type: phandle
+    required: true
+    description: SPI controller the panel is wired to.
+  spi-max-frequency:
+    type: int
+    default: 4000000
+  cs-gpios:
+    type: phandle-array
+    required: true
+  dc-gpios:
+    type: phandle-array
+    required: true
+    description: Data/command select (high = data).
+  reset-gpios:
+    type: phandle-array
+    required: true
+  busy-gpios:
+    type: phandle-array
+    required: true
+    description: BUSY output of the panel, active high.
+  power-gpios:
+    type: phandle-array
+    description: |
+      Optional switch for panel supply (nice!nano VCC switch on P0.13).
+      Active state = panel powered.
+  power-on-delay-ms:
+    type: int
+    default: 20

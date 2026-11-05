@@ -1,0 +1,91 @@
+/*
+ * nice!nano / ProMicro nRF52840 + 2.9" SSD1680 B/W/R breakout.
+ * Wiring (see docs/hardware.md):
+ *   breakout  ->  nice!nano pin
+ *   VCC       ->  VCC (3.3 V, switched by P0.13)
+ *   GND       ->  GND
+ *   CLK/SCL   ->  P0.20 (D3)
+ *   DIN/SDA   ->  P0.17 (D2)
+ *   CS        ->  P0.22 (D4)
+ *   DC        ->  P0.24 (D5)
+ *   RST       ->  P1.00 (D6)
+ *   BUSY      ->  P0.11 (D7)
+ */
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+
+/ {
+	chosen {
+		/* Release build has no console; debug.conf re-enables CDC ACM. */
+	};
+
+	epd: epd {
+		compatible = "wx,ssd1680-bwr";
+		spi-bus = <&spi2>;
+		spi-max-frequency = <4000000>;
+		cs-gpios = <&gpio0 22 GPIO_ACTIVE_LOW>;
+		dc-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>;
+		busy-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+		/* nice!nano v2: P0.13 high enables the VCC pin. Delete on boards without it. */
+		power-gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+		power-on-delay-ms = <20>;
+	};
+
+	zephyr,user {
+		io-channels = <&adc 0>;
+	};
+};
+
+&pinctrl {
+	spi2_epd_default: spi2_epd_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 20)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 17)>;
+		};
+	};
+
+	spi2_epd_sleep: spi2_epd_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 20)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 17)>;
+			low-power-enable;
+		};
+	};
+};
+
+&spi2 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi2_epd_default>;
+	pinctrl-1 = <&spi2_epd_sleep>;
+	pinctrl-names = "default", "sleep";
+	/* Suspend (pins -> disconnected) whenever no transfer is running. */
+	zephyr,pm-device-runtime-auto;
+};
+
+/* Battery: nice!nano feeds the cell to VDDH; measure VDDH/5 internally. */
+&adc {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	zephyr,pm-device-runtime-auto;
+
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>;
+	};
+};
+
+/* Unused peripherals off: nothing left clocked or holding pins. */
+&uart0 { status = "disabled"; };
+&i2c0 { status = "disabled"; };
+&i2c1 { status = "disabled"; };
+&pwm0 { status = "disabled"; };
+&ieee802154 { status = "disabled"; };
+
+&wdt0 { status = "okay"; };

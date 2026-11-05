@@ -1,0 +1,189 @@
+/*
+ * WxPaper: battery-powered BLE e-paper weather display.
+ * Main state machine: poll host -> (maybe) refresh panel -> sleep.
+ * See docs/firmware.md.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <zephyr/device.h>
+#include <zephyr/drivers/watchdog.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/reboot.h>
+
+#include "battery.h"
+#include "epd_ssd1680.h"
+#include "framebuf.h"
+#include "wx_service.h"
+
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+
+static uint8_t fb[FB_BYTES];
+
+static const struct device *const wdt = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(wdt0));
+static int wdt_channel = -1;
+
+static void wdt_start(void)
+{
+	if (!wdt || !device_is_ready(wdt)) {
+		return;
+	}
+	const struct wdt_timeout_cfg cfg = {
+		.window = {.min = 0, .max = (uint32_t)CONFIG_WX_WDT_TIMEOUT_S * 1000U},
+		.flags = WDT_FLAG_RESET_SOC,
+	};
+
+	wdt_channel = wdt_install_timeout(wdt, &cfg);
+	if (wdt_channel >= 0) {
+		/* Keep counting while the CPU sleeps: catches a hung main loop. */
+		(void)wdt_setup(wdt, WDT_OPT_PAUSE_HALTED_BY_DBG);
+	}
+}
+
+static void wdt_kick(void)
+{
+	if (wdt_channel >= 0) {
+		(void)wdt_feed(wdt, wdt_channel);
+	}
+}
+
+/* Sleep in chunks short enough to keep feeding the watchdog. */
+static void sleep_s(uint32_t secs)
+{
+	const uint32_t chunk = MAX(CONFIG_WX_WDT_TIMEOUT_S / 3, 60);
+
+	while (secs) {
+		uint32_t s = MIN(secs, chunk);
+
+		k_sleep(K_SECONDS(s));
+		wdt_kick();
+		secs -= s;
+	}
+}
+
+static int refresh(struct wx_status *st)
+{
+	int err = epd_show(fb, fb + EPD_PLANE_BYTES);
+
+	st->refresh_count++;
+	if (err) {
+		st->flags |= WX_FLAG_REFRESH_FAILED;
+	} else {
+		st->flags &= ~WX_FLAG_REFRESH_FAILED;
+	}
+	return err;
+}
+
+int main(void)
+{
+	struct wx_status st = {
+		.battery_pct = 255,
+		.flags = WX_FLAG_NO_IMAGE,
+	};
+	int64_t last_contact_ms = k_uptime_get();
+	bool retry_pending = false;
+	bool crit_shown = false;
+	int err;
+
+	wdt_start();
+
+	err = epd_init();
+	if (err) {
+		LOG_ERR("epd init %d", err);
+	}
+	err = battery_init();
+	if (err) {
+		LOG_ERR("battery init %d", err);
+	}
+	err = wx_service_init();
+	if (err) {
+		LOG_ERR("bt init %d", err);
+		/* Without BLE the device is useless: back off, then reboot and retry. */
+		k_sleep(K_SECONDS(60));
+		sys_reboot(SYS_REBOOT_COLD);
+	}
+
+	int mv = battery_read_mv();
+
+	if (mv <= 0 || mv >= CONFIG_WX_CRIT_BATT_MV) {
+		fb_draw_splash(fb, "WXPAPER", "WAITING FOR HOST");
+		(void)refresh(&st);
+	}
+
+	for (;;) {
+		bool need_refresh = false;
+
+		wdt_kick();
+
+		mv = battery_read_mv();
+		bool mv_valid = mv > 0;
+		bool low = mv_valid && mv < CONFIG_WX_LOW_BATT_MV;
+		bool crit = mv_valid && mv < CONFIG_WX_CRIT_BATT_MV;
+
+		st.battery_mv = mv_valid ? (uint16_t)mv : 0;
+		st.battery_pct = mv_valid ? battery_pct(mv) : 255;
+		WRITE_BIT(st.flags, 1, low); /* WX_FLAG_LOW_BATT */
+		if (!crit) {
+			crit_shown = false;
+		}
+
+		wx_service_set_status(&st);
+		enum wx_poll_result res = wx_poll();
+		int64_t now = k_uptime_get();
+
+		LOG_INF("poll result %d, batt %d mV", res, mv);
+
+		switch (res) {
+		case WX_POLL_NEW_IMAGE:
+			st.displayed_crc = wx_take_image(fb);
+			st.flags &= ~(WX_FLAG_NO_IMAGE | WX_FLAG_STALE_SHOWN);
+			need_refresh = true;
+			__fallthrough;
+		case WX_POLL_NO_CHANGE:
+			last_contact_ms = now;
+			retry_pending = false;
+			break;
+		case WX_POLL_NO_CONTACT:
+			if ((now - last_contact_ms) / 1000 >= CONFIG_WX_STALE_AFTER_S &&
+			    !(st.flags & (WX_FLAG_STALE_SHOWN | WX_FLAG_NO_IMAGE))) {
+				fb_draw_offline(fb);
+				st.displayed_crc = 0; /* panel no longer matches any host image */
+				st.flags |= WX_FLAG_STALE_SHOWN;
+				need_refresh = true;
+			}
+			break;
+		}
+
+		if (crit) {
+			/*
+			 * A full refresh draws several mA for ~20 s and can brown out a
+			 * nearly empty cell. Show LOW BATTERY once, then stop refreshing.
+			 */
+			if (!crit_shown) {
+				fb_draw_low_batt(fb);
+				st.displayed_crc = 0;
+				need_refresh = true;
+				crit_shown = true;
+			} else {
+				need_refresh = false;
+			}
+		}
+
+		if (need_refresh) {
+			(void)refresh(&st);
+		}
+
+		uint32_t interval = crit ? CONFIG_WX_CRIT_POLL_INTERVAL_S : wx_poll_interval_s();
+
+		if (res == WX_POLL_NO_CONTACT && !retry_pending) {
+			retry_pending = true;
+			interval = MIN(interval, CONFIG_WX_RETRY_INTERVAL_S);
+		} else if (res == WX_POLL_NO_CONTACT) {
+			retry_pending = false; /* back to the normal cadence */
+		}
+
+		sleep_s(interval);
+	}
+
+	return 0;
+}

@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "WxPaper e-paper weather display"
+
+menu "WxPaper"
+
+config WX_POLL_INTERVAL_S
+	int "Default poll interval (s)"
+	default 1800
+	range 300 86400
+	help
+	  Time between wake-ups that advertise for new data. The host can
+	  override it at runtime with the SET_INTERVAL control op.
+
+config WX_RETRY_INTERVAL_S
+	int "Retry interval after a failed poll (s)"
+	default 300
+	help
+	  After a poll where no host connected, the next poll happens this
+	  much sooner (once), in case the host was briefly unavailable.
+
+config WX_ADV_WINDOW_S
+	int "Advertising window per poll (s)"
+	default 30
+
+config WX_SESSION_TIMEOUT_S
+	int "GATT inactivity timeout before the device disconnects (s)"
+	default 20
+
+config WX_STALE_AFTER_S
+	int "Draw the offline marker after this long without host contact (s)"
+	default 10800
+
+config WX_LOW_BATT_MV
+	int "Low battery threshold (mV): show marker"
+	default 3400
+
+config WX_CRIT_BATT_MV
+	int "Critical battery threshold (mV): stop refreshing, poll slowly"
+	default 3300
+
+config WX_CRIT_POLL_INTERVAL_S
+	int "Poll interval while battery is critical (s)"
+	default 7200
+
+config WX_ROTATION
+	int "Landscape rotation used by on-device overlays (90 or 270)"
+	default 90
+	help
+	  Must match the host renderer's `rotate` setting so the device's own
+	  splash/offline text is upright.
+
+config WX_EPD_RED_INVERT
+	bool "Invert the red RAM plane when writing to the panel"
+	help
+	  Protocol payloads use 1 = red. Some SSD1680 B/W/R panels expect
+	  0 = red in RAM 0x26; enable this if red areas come out inverted.
+
+config WX_EPD_BUSY_TIMEOUT_MS
+	int "Max time to wait for a full refresh (ms)"
+	default 40000
+
+config WX_WDT_TIMEOUT_S
+	int "Watchdog timeout (s)"
+	default 10800
+	help
+	  The watchdog keeps running while the CPU sleeps; the main loop
+	  sleeps in chunks of at most WX_WDT_TIMEOUT_S / 3 and feeds it.
+
+endmenu
+
+source "Kconfig.zephyr"
