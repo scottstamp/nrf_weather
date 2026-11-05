@@ -10,6 +10,8 @@
  *   DC        ->  P0.24 (D5)
  *   RST       ->  P1.00 (D6)
  *   BUSY      ->  P0.11 (D7)
+ *
+ * Poll button: momentary switch between P1.04 (D8) and GND (internal pull-up).
  */
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 
@@ -29,6 +31,15 @@
 		/* nice!nano v2: P0.13 high enables the VCC pin. Delete on boards without it. */
 		power-gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
 		power-on-delay-ms = <20>;
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		/* Press = poll the host now (works on battery; no USB needed). */
+		poll_button: poll_button {
+			gpios = <&gpio1 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Poll";
+		};
 	};
 
 	zephyr,user {
@@ -89,3 +100,12 @@
 &ieee802154 { status = "disabled"; };
 
 &wdt0 { status = "okay"; };
+
+/*
+ * Edge detection for the button via the GPIO SENSE/PORT mechanism instead of a
+ * GPIOTE IN channel: GPIOTE IN events keep extra clocks running (~tens of uA),
+ * SENSE costs ~nothing in System ON idle.
+ */
+&gpio1 {
+	sense-edge-mask = <(1 << 4)>;
+};

@@ -22,6 +22,7 @@ Pins are chosen so they all sit on the left header (D2–D7) next to each other.
 | DC   | D5 | P0.24 | data/command |
 | RST  | D6 | P1.00 | reset (active low) |
 | BUSY | D7 | P0.11 | busy (active high) |
+| Poll button | D8 | P1.04 | momentary switch to **GND**; internal pull-up, active low |
 
 The SSD1680 is write-only here, so MISO isn't used. Run SPI at 4 MHz. The controller allows up to 20 MHz for writes, but short jumper wires are happier slower.
 
@@ -33,6 +34,16 @@ The SSD1680 is write-only here, so MISO isn't used. Run SPI at 4 MHz. The contro
 - **32.768 kHz crystal**: the build assumes it is present (nice!nano v2 has one). For clones without it, build with `-DEXTRA_CONF_FILE=rc_lfclk.conf`. If the crystal is missing and XTAL is selected, Bluetooth never starts.
 - **DCDC**: off by default. It needs the DCDC inductors on the board, and enabling it on a board without them stops the chip from running. It only saves current while active (radio, SPI), not in sleep, so the gain here is small. It's a Phase 5 item, to check against the board schematic.
 - **nice!nano LED / charger**: the blue charge LED only lights while charging. The user LED (P0.15) is not used.
+
+## Poll button
+
+A momentary push button between **D8 (P1.04)** and **GND** makes the device poll the host immediately. This works on battery, and no USB is needed. No external resistor is needed, because the internal pull-up is enabled.
+
+- **While waiting:** the press is detected with the GPIO SENSE mechanism (`sense-edge-mask` in the overlay), so waiting for it costs essentially nothing in sleep.
+- **While held:** the pull-up draws about 250 µA, only while the button is pressed.
+- **On a press:** the user LED (P0.15) blinks for 50 ms. If there's new data, the panel refreshes about 20 s later. If there's no new data, the blink is the only feedback.
+
+A press during an ongoing poll or refresh is kept, and a new poll starts right after it.
 
 ## Mounting
 

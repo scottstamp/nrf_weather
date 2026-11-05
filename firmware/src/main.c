@@ -13,6 +13,7 @@
 #include <zephyr/sys/reboot.h>
 
 #include "battery.h"
+#include "button.h"
 #include "devcmd.h"
 #include "epd_ssd1680.h"
 #include "framebuf.h"
@@ -133,6 +134,10 @@ int main(void)
 #if defined(CONFIG_WX_DEVCMD)
 	(void)devcmd_init();
 #endif
+	err = button_init();
+	if (err && err != -ENODEV) {
+		LOG_ERR("button init %d", err);
+	}
 
 	err = epd_init();
 	if (err) {

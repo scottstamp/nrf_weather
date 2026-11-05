@@ -12,5 +12,6 @@ target_sources(app PRIVATE
 	src/framebuf.c
 	src/battery.c
 	src/wx_service.c
+	src/button.c
 )
 target_sources_ifdef(CONFIG_WX_DEVCMD app PRIVATE src/devcmd.c)
