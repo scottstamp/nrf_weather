@@ -6,6 +6,7 @@
  *   poll   wake the main loop and poll the host now (no reboot)
  *   reset  software reset (no splash refresh; polls right after boot)
  *   boot   reboot into the Adafruit UF2 bootloader (PROMICRO drive)
+ *   status uptime, battery, USB enable path/time, reset cause
  *   help   list commands
  * Opening the port at 1200 baud also reboots into the bootloader
  * (Arduino-style "1200 bps touch"), e.g. `stty -F /dev/ttyACM0 1200`.
@@ -21,8 +22,11 @@
  */
 #include "devcmd.h"
 
+#include "battery.h"
+
 #include <string.h>
 #include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -42,6 +46,13 @@ static const struct device *const uart = DEVICE_DT_GET(DT_CHOSEN(zephyr_console)
 static char line[16];
 static size_t line_len;
 static char pending[sizeof(line)];
+
+/* How/when USB was last enabled (logs written at that moment never reach a
+ * host: the port isn't open yet). Reported by `status`.
+ */
+static const char *usb_en_via = "never";
+static int64_t usb_en_uptime_ms = -1;
+static uint32_t boot_reset_cause;
 
 static void cmd_work_fn(struct k_work *work);
 static K_WORK_DEFINE(cmd_work, cmd_work_fn);
@@ -69,8 +80,15 @@ static void cmd_work_fn(struct k_work *work)
 		sys_reboot(SYS_REBOOT_COLD);
 	} else if (strcmp(pending, "boot") == 0) {
 		reboot_to_bootloader();
+	} else if (strcmp(pending, "status") == 0) {
+		int mv = battery_read_mv();
+
+		LOG_INF("status: uptime %lld s, batt %d mV, reset cause 0x%08x",
+			k_uptime_get() / 1000, mv, boot_reset_cause);
+		LOG_INF("status: USB enabled via %s at uptime %lld s", usb_en_via,
+			usb_en_uptime_ms < 0 ? -1LL : usb_en_uptime_ms / 1000);
 	} else if (pending[0] != '\0') {
-		LOG_INF("commands: poll | reset | boot | help  (1200-baud open = boot)");
+		LOG_INF("commands: poll | reset | boot | status | help  (1200-baud open = boot)");
 	}
 }
 
@@ -104,6 +122,8 @@ static void usb_msg_cb(struct usbd_context *const ctx, const struct usbd_msg *ms
 	switch (msg->type) {
 	case USBD_MSG_VBUS_READY:
 		if (usbd_enable(ctx) == 0) {
+			usb_en_via = "VBUS_READY event";
+			usb_en_uptime_ms = k_uptime_get();
 			LOG_INF("USB cable detected: USB enabled");
 		}
 		break;
@@ -141,8 +161,9 @@ static int usb_power_init(void)
 		 * A cable present at boot may have raised VBUS_READY before the
 		 * callback existed: check the USB regulator status directly.
 		 */
-		if (nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {
-			(void)usbd_enable(ctx);
+		if (nrf_power_usbregstatus_vbusdet_get(NRF_POWER) && usbd_enable(ctx) == 0) {
+			usb_en_via = "boot-time VBUS check";
+			usb_en_uptime_ms = k_uptime_get();
 		}
 	}
 	return n ? 0 : -ENODEV;
@@ -153,9 +174,11 @@ int devcmd_init(void)
 	if (!device_is_ready(uart)) {
 		return -ENODEV;
 	}
+	/* main.c's want_splash() clears RESETREAS later; read it first. */
+	(void)hwinfo_get_reset_cause(&boot_reset_cause);
 	(void)usb_power_init();
 	uart_irq_callback_set(uart, uart_cb);
 	uart_irq_rx_enable(uart);
-	LOG_INF("dev console: poll | reset | boot | help");
+	LOG_INF("dev console: poll | reset | boot | status | help");
 	return 0;
 }

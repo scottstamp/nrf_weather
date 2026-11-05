@@ -51,6 +51,7 @@ Sizes at v0.1.0:
 | `poll`  | End the current sleep and poll the host now, without a reboot. A request made during a poll or refresh triggers the next poll straight after it. |
 | `reset` | Software reset. The splash is skipped on software resets, so the device polls about 1 s after boot. |
 | `boot`  | Write `GPREGRET = 0x57` and reset into the Adafruit UF2 bootloader, which mounts the `PROMICRO` drive. |
+| `status` | Uptime, battery mV, reset cause, and how and when USB was last enabled (`boot-time VBUS check` or `VBUS_READY event`). |
 | `help`  | List the commands. |
 | 1200-baud open | Same as `boot` (Arduino-style touch): `stty -F /dev/ttyACM0 1200`. |
 

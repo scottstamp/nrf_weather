@@ -66,7 +66,8 @@ Verified on hardware:
 - `help` answers.
 - The 1200-baud touch reaches the bootloader in 4 s.
 
+- **Unplug and replug on battery** (10:22): the cable was unplugged at 10:22:00 and replugged at 10:22:07. Afterwards, `status` reported `uptime 40 s` (no reboot) and `USB enabled via VBUS_READY event at uptime 35 s`, so the VBUS event path works. The `USB cable detected` log line itself is never seen, because it is written before the host opens the port. The same applies to the boot banner on a battery boot. Use `status` instead.
+
 Still to verify:
 
-- **Unplug and replug:** the log should show `USB cable detected: USB enabled`.
 - **Sleep current on battery:** measure with a PPK2.
