@@ -337,12 +337,12 @@ def _draw_big_temp(ctx: _Ctx, x: int, top: int, max_w: int, temp: float | None, 
 
 
 def _wind_text(cur: Current) -> str:
-    """Sustained wind only, e.g. 'Wind: 9 km' (direction and gusts intentionally omitted)."""
+    """Sustained wind only, e.g. 'W: 13km' (direction/gusts omitted, "/h" implied: user preference)."""
     if cur.wind_kph is None:
-        return "Wind: --"
+        return "W: --"
     if cur.wind_kph == 0:
-        return "Wind: Calm"
-    return f"Wind: {cur.wind_kph} km"  # "/h" implied (user preference)
+        return "W: calm"
+    return f"W: {cur.wind_kph}km"
 
 
 def _draw_triangle(ctx: _Ctx, x: int, y: int, w: int, up: bool, fill: int = BLACK) -> None:
@@ -477,10 +477,10 @@ def render(
     _paste_icon(ctx, cur.icon, icon_x, 2, ICON_BIG)
     _draw_big_temp(ctx, 4, 4, icon_x - 6, cur.temp_c)
 
-    # wind row
-    ctx.fit_text(4, 88, _wind_text(cur), True, left_w - 4, 22, 16)
+    # condition row (directly under the temperature)
+    ctx.fit_text(4, 88, cur.condition or "", True, left_w - 4, 22, 14)
 
-    # condition + feels row
+    # wind + feels row
     feels = cur.feels_like_c
     show_feels = feels is not None and (cur.temp_c is None or round(feels) != round(cur.temp_c))
     fw = 0.0
@@ -488,7 +488,7 @@ def render(
         ff = _font(cfg.font_bold, 16)
         ft = f"Feels {_fmt_t(feels)}"
         fw = ctx.text(left_w, 104, ft, ff, RED if (feels <= -30 or feels >= 35) else BLACK, "r")
-    ctx.fit_text(4, 104, cur.condition or "", True, left_w - 4 - (fw + 10 if show_feels else 0), 17, 13)
+    ctx.fit_text(4, 104, _wind_text(cur), True, left_w - 4 - (fw + 10 if show_feels else 0), 17, 13)
 
     # divider + forecast
     if has_fc:
