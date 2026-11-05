@@ -1,0 +1,8 @@
+build/
+firmware/build*/
+.venv/
+__pycache__/
+*.pyc
+host/*.egg-info/
+host/out/
+.pytest_cache/

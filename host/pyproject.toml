@@ -1,0 +1,25 @@
+[project]
+name = "wxd"
+version = "0.1.0"
+description = "Host daemon for the nRF52840 e-paper weather display"
+requires-python = ">=3.11"
+dependencies = [
+    "bleak>=0.22",
+    "Pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+wxd = "wxd.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wxd*"]
+
+[tool.setuptools.package-data]
+wxd = ["assets/*"]
