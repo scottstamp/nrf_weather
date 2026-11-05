@@ -203,13 +203,13 @@ _WMO_TEXT = {
 
 _DAYS = {"monday": "MON", "tuesday": "TUE", "wednesday": "WED", "thursday": "THU",
          "friday": "FRI", "saturday": "SAT", "sunday": "SUN"}
-_SPECIAL = {"today": "TODAY", "tonight": "TONITE", "this afternoon": "AFTN",
+_SPECIAL = {"today": "DAY", "tonight": "NIGHT", "this afternoon": "AFTN",
             "this evening": "EVE", "overnight": "NIGHT", "tomorrow": "TMRW",
             "tomorrow night": "TMR NT"}
 
 
 def short_name(name: str) -> str:
-    """'Friday night' -> 'FRI NT', 'Tonight' -> 'TONITE'; always <= 6 chars, uppercase."""
+    """'Friday night' -> 'FRI NT', 'Tonight' -> 'NIGHT'; always <= 6 chars, uppercase."""
     n = (name or "").strip().lower()
     if n in _SPECIAL:
         return _SPECIAL[n]
@@ -450,9 +450,9 @@ def parse_open_meteo(data: dict, cfg: WeatherConfig, now: datetime | None = None
         if is_today:
             # skip the day half once the sun has set
             if sset is None or now < sset:
-                periods.append(Period("Today", "TODAY", wmo_icon(wcode, True), tmax, True,
+                periods.append(Period("Today", "DAY", wmo_icon(wcode, True), tmax, True,
                                       pop, summ, amount))
-            periods.append(Period("Tonight", "TONITE", wmo_icon(wcode, False), tmin, False,
+            periods.append(Period("Tonight", "NIGHT", wmo_icon(wcode, False), tmin, False,
                                   pop, summ, amount))
         else:
             periods.append(Period(dname, short_name(dname), wmo_icon(wcode, True), tmax, True,
@@ -523,7 +523,7 @@ def sample_model(now: datetime | None = None) -> WeatherModel:
         station="St. John's Int'l Airport",
     )
     periods = [
-        Period("Tonight", "TONITE", Icon.BLOWING_SNOW, -7, False, 80,
+        Period("Tonight", "NIGHT", Icon.BLOWING_SNOW, -7, False, 80,
                "Snow at times heavy.", "10 cm"),
         Period("Friday", "FRI", Icon.SNOW, -3, True, 70, "Snow. Amount 5 cm.", "5 cm"),
         Period("Friday night", "FRI NT", Icon.CLOUDY, -9, False, 20, "Cloudy.", None),

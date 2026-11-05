@@ -35,7 +35,7 @@ https://api.weather.gc.ca/collections/citypageweather-realtime/items/nl-24?f=jso
 | `humidity_pct`, `pressure_kpa`, `pressure_tendency` | `relativeHumidity`, `pressure.value`, `pressure.tendency` (rising/falling/steady) |
 | `observed_at`, `station` | `timestamp.en` (UTC), `station.value.en` |
 | `Period.name` | `forecastGroup.forecasts[].period.textForecastName` ("Tonight", "Friday night") |
-| `short_name` | derived: TODAY, TONITE, AFTN, EVE, FRI, FRI NT |
+| `short_name` | derived: DAY, NIGHT, AFTN, EVE, FRI, FRI NT |
 | `Period.icon` | `abbreviatedForecast.icon.value` |
 | `temp_c`, `temp_is_high` | `temperatures.temperature[0].value` / `.class` (high/low) |
 | `pop_pct` | `abbreviatedForecast.pop.value` if present, else max "NN percent chance" parsed from `textSummary` |

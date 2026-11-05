@@ -602,7 +602,7 @@ def _scenarios() -> dict[str, tuple[WeatherModel, DeviceStatus | None, datetime]
         Current(obs, -12.4, "Light Snow", Icon.SNOW, feels_like_c=-22, wind_kph=40,
                 wind_gust_kph=60, wind_dir="NW", humidity_pct=85, station="St. John's A"),
         [
-            Period("Tonight", "TONITE", Icon.CLOUDY, -15, False, 20),
+            Period("Tonight", "NIGHT", Icon.CLOUDY, -15, False, 20),
             Period("Friday", "FRI", Icon.SNOW, -8, True, 70, "Snow. Amount 10 cm."),
             Period("Friday night", "FRI NT", Icon.FLURRIES, -14, False, 40),
         ],
@@ -614,7 +614,7 @@ def _scenarios() -> dict[str, tuple[WeatherModel, DeviceStatus | None, datetime]
         Current(datetime(2026, 7, 20, 13, 0, tzinfo=_NST), 24.2, "Sunny", Icon.CLEAR_DAY,
                 feels_like_c=27, wind_kph=15, wind_dir="SW"),
         [
-            Period("Tonight", "TONITE", Icon.CLEAR_NIGHT, 14, False, 0),
+            Period("Tonight", "NIGHT", Icon.CLEAR_NIGHT, 14, False, 0),
             Period("Wednesday", "WED", Icon.PARTLY_CLOUDY_DAY, 22, True, 10),
             Period("Wednesday night", "WED NT", Icon.SHOWERS_NIGHT, 13, False, 60),
         ],
@@ -634,14 +634,14 @@ def _scenarios() -> dict[str, tuple[WeatherModel, DeviceStatus | None, datetime]
     missing = WeatherModel(
         "St. John's", "open-meteo", now,
         Current(None, None, "", Icon.UNKNOWN),
-        [Period("Tonight", "TONITE", Icon.UNKNOWN, None, False)],
+        [Period("Tonight", "NIGHT", Icon.UNKNOWN, None, False)],
     )
     lowbatt = WeatherModel(
         "St. John's", "eccc", now,
         Current(obs, 2.0, "Mainly Cloudy", Icon.PARTLY_CLOUDY_NIGHT, feels_like_c=-3,
                 wind_kph=25, wind_gust_kph=45, wind_dir="E"),
         [
-            Period("Tonight", "TONITE", Icon.RAIN, 1, False, 80),
+            Period("Tonight", "NIGHT", Icon.RAIN, 1, False, 80),
             Period("Friday", "FRI", Icon.SHOWERS_DAY, 4, True, 50),
             Period("Friday night", "FRI NT", Icon.DRIZZLE, -1, False, 30),
         ],

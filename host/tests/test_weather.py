@@ -32,7 +32,7 @@ def test_eccc_fixture():
     # obs 06:30 NST is after 06:50 sunrise? no -> night icon kept; either way a clear icon
     assert c.icon in (Icon.CLEAR_DAY, Icon.CLEAR_NIGHT)
     p = m.periods
-    assert [x.short_name for x in p[:4]] == ["TODAY", "TONITE", "FRI", "FRI NT"]
+    assert [x.short_name for x in p[:4]] == ["DAY", "NIGHT", "FRI", "FRI NT"]
     assert p[0].temp_is_high and p[0].temp_c == 6
     assert not p[1].temp_is_high and p[1].temp_c == 3 and p[1].pop_pct == 40
     assert all(len(x.short_name) <= 6 and x.short_name.isupper() for x in p)
@@ -59,7 +59,7 @@ def test_open_meteo_fixture():
     c = m.current
     assert c.temp_c == -4.3 and c.feels_like_c == -8.6 and c.icon == Icon.CLEAR_DAY
     assert c.wind_kph == 9 and c.wind_dir == "SSW" and c.pressure_kpa == 102.6
-    assert [x.short_name for x in m.periods[:4]] == ["TODAY", "TONITE", "FRI", "FRI NT"]
+    assert [x.short_name for x in m.periods[:4]] == ["DAY", "NIGHT", "FRI", "FRI NT"]
     assert m.periods[1].icon == Icon.CLEAR_NIGHT and not m.periods[1].temp_is_high
     assert m.today_high_c == 6 and m.today_low_c == -5
 
@@ -67,7 +67,7 @@ def test_open_meteo_fixture():
 def test_open_meteo_after_sunset_skips_day_half():
     late = datetime(2026, 11, 5, 20, 0, tzinfo=TZ)
     m = w.parse_open_meteo(load("open_meteo.json"), CFG, now=late)
-    assert m.periods[0].short_name == "TONITE"
+    assert m.periods[0].short_name == "NIGHT"
 
 
 @pytest.mark.parametrize("parse", [w.parse_eccc, w.parse_open_meteo])
@@ -80,7 +80,7 @@ def test_empty_responses_do_not_crash(parse, data):
 
 
 def test_short_names():
-    assert w.short_name("Tonight") == "TONITE"
+    assert w.short_name("Tonight") == "NIGHT"
     assert w.short_name("Friday night") == "FRI NT"
     assert w.short_name("Wednesday") == "WED"
     assert w.short_name("Some Long Unknown Name") == "SOME L"

@@ -62,7 +62,7 @@ class Period:
     """A forecast period. ECCC style is day/night halves ("Tonight", "Friday", "Friday night")."""
 
     name: str  # long name, e.g. "Friday night"
-    short_name: str  # <= 6 chars for the display, e.g. "FRI", "TONITE", "FRI NT"
+    short_name: str  # <= 6 chars for the display, e.g. "FRI", "NIGHT", "FRI NT"
     icon: Icon
     temp_c: int | None
     temp_is_high: bool  # True = daytime high, False = overnight low
