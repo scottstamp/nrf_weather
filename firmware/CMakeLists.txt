@@ -13,3 +13,4 @@ target_sources(app PRIVATE
 	src/battery.c
 	src/wx_service.c
 )
+target_sources_ifdef(CONFIG_WX_DEVCMD app PRIVATE src/devcmd.c)

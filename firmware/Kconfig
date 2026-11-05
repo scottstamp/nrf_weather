@@ -66,6 +66,13 @@ config WX_WDT_TIMEOUT_S
 	  The watchdog keeps running while the CPU sleeps; the main loop
 	  sleeps in chunks of at most WX_WDT_TIMEOUT_S / 3 and feeds it.
 
+config WX_DEVCMD
+	bool "Debug command console on the USB CDC ACM port"
+	depends on SERIAL && UART_INTERRUPT_DRIVEN && UART_LINE_CTRL
+	help
+	  Line commands poll / reset / boot / help, plus 1200-baud touch to
+	  enter the UF2 bootloader. Debug builds only (needs the USB stack).
+
 endmenu
 
 source "Kconfig.zephyr"

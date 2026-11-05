@@ -13,6 +13,7 @@
 #include <zephyr/sys/reboot.h>
 
 #include "battery.h"
+#include "devcmd.h"
 #include "epd_ssd1680.h"
 #include "framebuf.h"
 #include "wx_service.h"
@@ -55,16 +56,31 @@ static void wdt_kick(void)
 	}
 }
 
-/* Sleep in chunks short enough to keep feeding the watchdog. */
+static K_SEM_DEFINE(wake_sem, 0, 1);
+
+void wx_wake_now(void)
+{
+	k_sem_give(&wake_sem);
+}
+
+/*
+ * Sleep in chunks short enough to keep feeding the watchdog. Ends early if
+ * wx_wake_now() is called (debug console "poll"). The CPU idles in System ON
+ * either way: a semaphore wait with timeout costs the same as k_sleep().
+ */
 static void sleep_s(uint32_t secs)
 {
 	const uint32_t chunk = MAX(CONFIG_WX_WDT_TIMEOUT_S / 3, 60);
 
+	/* A wake request made while polling/refreshing is kept: it ends this sleep at once. */
 	while (secs) {
 		uint32_t s = MIN(secs, chunk);
+		bool woken = k_sem_take(&wake_sem, K_SECONDS(s)) == 0;
 
-		k_sleep(K_SECONDS(s));
 		wdt_kick();
+		if (woken) {
+			return;
+		}
 		secs -= s;
 	}
 }
@@ -114,6 +130,9 @@ int main(void)
 	int err;
 
 	wdt_start();
+#if defined(CONFIG_WX_DEVCMD)
+	(void)devcmd_init();
+#endif
 
 	err = epd_init();
 	if (err) {

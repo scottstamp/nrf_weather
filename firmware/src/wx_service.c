@@ -296,6 +296,12 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	cur_conn = bt_conn_ref(conn);
 	k_spin_unlock(&conn_lock, key);
+
+	struct bt_conn_info info;
+
+	if (bt_conn_get_info(conn, &info) == 0) {
+		LOG_INF("initial interval %u us", info.le.interval_us);
+	}
 	rx_begun = false;
 	touch();
 	LOG_INF("connected");
@@ -326,9 +332,29 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	k_sem_give(&link_down);
 }
 
+static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t latency,
+			     uint16_t timeout)
+{
+	LOG_INF("conn params: interval %u.%02u ms, latency %u, timeout %u ms", interval * 5 / 4,
+		(interval * 125) % 100, latency, timeout * 10);
+}
+
+static void le_phy_updated(struct bt_conn *conn, struct bt_conn_le_phy_info *param)
+{
+	LOG_INF("phy: tx %u rx %u", param->tx_phy, param->rx_phy);
+}
+
+static void le_data_len_updated(struct bt_conn *conn, struct bt_conn_le_data_len_info *info)
+{
+	LOG_INF("data len: tx %u B rx %u B", info->tx_max_len, info->rx_max_len);
+}
+
 BT_CONN_CB_DEFINE(conn_cb) = {
 	.connected = connected,
 	.disconnected = disconnected,
+	.le_param_updated = le_param_updated,
+	.le_phy_updated = le_phy_updated,
+	.le_data_len_updated = le_data_len_updated,
 };
 
 /* ---- Advertising ---- */

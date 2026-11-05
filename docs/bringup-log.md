@@ -29,3 +29,27 @@
 
 - `SET_INTERVAL` floor lowered to 60 s for debugging, on both firmware and host. Debug build: poll and retry every 60 s.
 - Gotcha: a host process started with an old config pushes its own `poll_interval_s` through `SET_INTERVAL`. The device keeps that value until the next reset or the next `SET_INTERVAL`.
+
+## Session 1, continued: tooling and link tuning
+
+**Dev console:** `poll`, `reset`, `boot` and the 1200-baud touch were all verified on hardware.
+
+- `poll` → NO_CHANGE in 1.56 s.
+- `reset` → reboot without the splash; the host reconnects as soon as its debounce ends.
+- `boot` → `PROMICRO` drive in about 3–5 s, used by `scripts/flash.sh`.
+
+**Host MTU fix:** after the fix, the host negotiates MTU 247 and sends 40 writes of 244 B.
+
+**Link timing with the BCM20702 (BT 4.0) adapter:**
+
+- **PHY:** stays at 1M. The adapter has no 2M PHY and no data-length extension, so LL payloads are 27 B, about 390 packets per image.
+- **Connection interval:**
+  - BlueZ opens at 48.75 ms, or at its cached value (15 ms) for a known device.
+  - The device's 7.5–15 ms request is deferred 5 s by Zephyr (`BT_CONN_PARAM_UPDATE_TIMEOUT`, as the spec requires).
+  - With the deferral set to 0, BlueZ immediately re-imposed 48.75 ms with a 420 ms timeout, so the default was kept.
+- **Result:** the data drains in about 4–5 s at roughly 4–5 packets per connection event. A session takes 6.1–6.4 s for an upload and 0.7–1.2 s for NO_CHANGE.
+- **Power impact:** radio-on time scales with packet count, not with wall time, so the slow interval costs little battery. A bigger win would be compressing the payload (fewer packets). This is a possible protocol v2 item.
+
+**Host debounce:** lowered from 60 s to 20 s. The 60 s value blocked polls in the 60 s debug cadence.
+
+**Determinism:** the same weather input gives the same CRC (`bbd89302`) across daemon restarts and reboots.

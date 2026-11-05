@@ -23,7 +23,10 @@ CONNECT_TIMEOUT_S = 10.0
 SESSION_TIMEOUT_S = 20.0  # device drops the link after 20 s of inactivity
 MAX_CHUNK = 244  # bytes per Data write (ATT_MTU 247 - 3)
 RESCAN_INTERVAL_S = 30 * 60
-SUCCESS_DEBOUNCE_S = 60.0
+# After a session the device stops advertising, but BlueZ can still report its last
+# advert for a few seconds; ignore it briefly. Must stay well below the shortest poll
+# interval (60 s in debug builds).
+SUCCESS_DEBOUNCE_S = 20.0
 FAILURE_DEBOUNCE_S = 2.0
 MAX_BACKOFF_S = 300.0
 
