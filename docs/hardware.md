@@ -44,15 +44,15 @@ Three momentary push buttons, each between its pin and **GND**. No external resi
 | Button | nice!nano | nRF pin | Press |
 |--------|-----------|---------|-------|
 | POLL | D8 | P1.04 | Poll the host now (new weather/tide data, if any, is drawn ~20 s later) |
-| WEATHER | D9 | P1.06 | Show the weather view |
-| TIDE | D14 | P1.11 | Show the tide view (upcoming high/low tides, see `tides.md`) |
+| WEATHER (home) | D9 | P1.06 | Show the weather view (the default view) |
+| TIDE | D14 | P1.11 | Show the tide view (upcoming high/low tides, see `tides.md`); returns to weather by itself after 3 min |
 
 D8 and D9 are the last two pins of the left header, right below the panel wiring (D2–D7). D14 is on the right header. These pins were chosen to stay clear of the NFC pins (D10 = P0.09, D16 = P0.10) and the analog inputs (D19–D21), and all three are on GPIO port 1 so one SENSE mask covers them.
 
 - **While waiting:** presses are detected with the GPIO SENSE mechanism (`sense-edge-mask` on `&gpio1` in the overlay), so waiting costs essentially nothing in sleep.
 - **While held:** each pull-up draws about 250 µA, only while its button is pressed.
 - **Feedback:** every accepted press blinks the user LED (P0.15) for 50 ms. Debounce is 30 ms.
-- **View buttons:** the device keeps the latest weather and tide images in RAM (protocol v2 image slots), so switching redraws the panel straight away (one full refresh, ~20 s) without contacting the host. Pressing the button of the view already shown does nothing but blink. The selected view stays until the other button is pressed. Uploads for the hidden view are stored without a refresh. Before the host has ever sent a tide image, the tide view shows "TIDES / NO DATA YET". After a reset, the device starts on the weather view.
+- **View buttons:** the device keeps the latest weather and tide images in RAM (protocol v2 image slots), so switching redraws the panel straight away (one full refresh, ~20 s) without contacting the host. Weather is the default view. After a TIDE press the panel goes back to weather by itself **3 minutes** after the tide view was drawn (`CONFIG_WX_TIDE_VIEW_S`), unless WEATHER is pressed first. Pressing TIDE again while it is shown restarts the 3 minutes without a refresh. Pressing WEATHER while weather is shown does nothing but blink. Uploads for the hidden view are stored without a refresh. Before the host has ever sent a tide image, the tide view shows "TIDES / NO DATA YET". After a reset, the device starts on the weather view.
 - **Low battery:** below the critical voltage the panel is not refreshed at all, so view presses are ignored (the LED still blinks).
 - A press during an ongoing poll or refresh is kept and handled right after it.
 

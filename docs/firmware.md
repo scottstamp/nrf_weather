@@ -112,6 +112,7 @@ boot ─► compose(view 0) = splash "WXPAPER / WAITING FOR HOST"; refresh only 
   └─► loop:
         sleep until next poll, or until a button / console event
         view event (WEATHER/TIDE button)  → select view (no host contact)
+        tide view shown for WX_TIDE_VIEW_S (180 s, from when it was drawn) → back to weather
         poll due or POLL event:
           read battery (VDDH)                    ← status flags LOW_BATT
           wx_poll(): advertise ≤ 30 s, serve one session (any slot may be updated)
@@ -149,6 +150,7 @@ Measured numbers belong here once a PPK2 run is done (Phase 5).
 | `WX_ADV_WINDOW_S` | 30 | advertising window per poll |
 | `WX_SESSION_TIMEOUT_S` | 20 | GATT inactivity timeout |
 | `WX_STALE_AFTER_S` | 10800 | draw OFFLINE after this long without contact |
+| `WX_TIDE_VIEW_S` | 180 | tide view returns to weather after this long |
 | `WX_LOW_BATT_MV` / `WX_CRIT_BATT_MV` | 3400 / 3300 | status flag / stop refreshing |
 | `WX_CRIT_POLL_INTERVAL_S` | 7200 | poll cadence when critical |
 | `WX_ROTATION` | 90 | must match host `rotate` |

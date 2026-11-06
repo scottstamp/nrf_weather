@@ -42,6 +42,15 @@ config WX_CRIT_POLL_INTERVAL_S
 	int "Poll interval while battery is critical (s)"
 	default 7200
 
+config WX_TIDE_VIEW_S
+	int "Tide view auto-return to weather after (s)"
+	default 180
+	range 10 86400
+	help
+	  After the TIDE button, the panel goes back to the weather view this
+	  long after the tide view was drawn, unless the WEATHER (home) button
+	  is pressed first. Another TIDE press restarts the timer.
+
 config WX_ROTATION
 	int "Landscape rotation used by on-device overlays (90 or 270)"
 	default 90

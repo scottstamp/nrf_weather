@@ -172,6 +172,8 @@ int main(void)
 	};
 	int64_t last_contact_ms = k_uptime_get();
 	int64_t next_poll_ms = 0; /* poll right after boot */
+	int64_t tide_until_ms = 0; /* tide view: auto-return to weather at this uptime */
+	bool tide_timer_pending = false; /* start the timer once the tide view is drawn */
 	uint32_t shown_crc;       /* CRC of the composed image on the panel */
 	bool retry_pending = false;
 	bool stale = false;
@@ -215,7 +217,9 @@ int main(void)
 	}
 
 	for (;;) {
-		sleep_until(next_poll_ms);
+		sleep_until(st.view == WX_VIEW_TIDE && !tide_timer_pending
+				    ? MIN(next_poll_ms, tide_until_ms)
+				    : next_poll_ms);
 		wdt_kick();
 
 		uint32_t ev = (uint32_t)atomic_clear(&events);
@@ -228,6 +232,12 @@ int main(void)
 				LOG_INF("view %d -> %d", st.view, v);
 				st.view = (uint8_t)v;
 			}
+			/* A (repeated) TIDE press (re)starts the return-to-weather timer. */
+			tide_timer_pending = v == WX_VIEW_TIDE;
+		} else if (st.view == WX_VIEW_TIDE && !tide_timer_pending &&
+			   k_uptime_get() >= tide_until_ms) {
+			LOG_INF("tide view timeout -> weather");
+			st.view = WX_VIEW_WEATHER;
 		}
 
 		if (do_poll) {
@@ -285,6 +295,9 @@ int main(void)
 				shown_crc = 0; /* redraw without the badge once charged */
 				crit_shown = true;
 			}
+			/* No refreshes: stay on (and report) the weather view. */
+			st.view = WX_VIEW_WEATHER;
+			tide_timer_pending = false;
 			continue;
 		}
 		crit_shown = false;
@@ -293,6 +306,11 @@ int main(void)
 		compose(st.view, stale);
 		if (crc32_ieee(fb, FB_BYTES) != shown_crc) {
 			shown_crc = refresh(&st);
+		}
+		if (tide_timer_pending) {
+			/* Counted from when the tide view is on the panel, not from the press. */
+			tide_until_ms = k_uptime_get() + (int64_t)CONFIG_WX_TIDE_VIEW_S * 1000;
+			tide_timer_pending = false;
 		}
 	}
 
