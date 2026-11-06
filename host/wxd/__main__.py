@@ -14,15 +14,17 @@ import signal
 import sys
 import types
 import typing
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from . import protocol as P
-from .config import Config, load_config, make_render_config, make_weather_config
+from .config import Config, load_config, make_render_config, make_tide_config, make_weather_config
 
 log = logging.getLogger("wxd")
+
+TIDE_STALE_AFTER = timedelta(hours=24)
 
 
 # ---------------------------------------------------------------- model JSON cache
@@ -68,15 +70,16 @@ def save_model(model: Any, path: Path) -> None:
     tmp.replace(path)
 
 
-def load_model(path: Path) -> Any | None:
+def load_model(path: Path, tp: Any = None) -> Any | None:
     try:
-        from .model import WeatherModel
+        if tp is None:
+            from .model import WeatherModel as tp
 
-        return from_jsonable(WeatherModel, json.loads(path.read_text()))
+        return from_jsonable(tp, json.loads(path.read_text()))
     except FileNotFoundError:
         return None
     except Exception as e:  # noqa: BLE001
-        log.warning("ignoring unreadable weather cache %s: %s", path, e)
+        log.warning("ignoring unreadable cache %s: %s", path, e)
         return None
 
 
@@ -88,11 +91,19 @@ class State:
         self.cfg = cfg
         self.model: Any | None = None
         self.cache_path = cfg.cache_dir / "model.json"
+        self.tides: Any | None = None
+        self.tide_cache_path = cfg.cache_dir / "tides.json"
 
     def load_cache(self) -> None:
         self.model = load_model(self.cache_path)
         if self.model is not None:
             log.info("loaded cached weather from %s (fetched %s)", self.cache_path, self.model.fetched_at)
+        if self.cfg.tides_enabled:
+            from .tides import TideModel
+
+            self.tides = load_model(self.tide_cache_path, TideModel)
+            if self.tides is not None:
+                log.info("loaded cached tides from %s (fetched %s)", self.tide_cache_path, self.tides.fetched_at)
 
     def fetch_sync(self) -> Any:
         from .weather import fetch_weather
@@ -118,21 +129,60 @@ class State:
             await self.refresh_once()
             await asyncio.sleep(self.cfg.refresh_s)
 
-    def payload_sync(self, status: P.DeviceStatus) -> bytes | None:
+    async def tide_refresh_once(self) -> bool:
+        from .tides import fetch_tides
+
+        try:
+            tides = await asyncio.to_thread(fetch_tides, make_tide_config(self.cfg))
+        except Exception as e:  # noqa: BLE001
+            log.warning("tide refresh failed: %s: %s", type(e).__name__, e)
+            return False
+        self.tides = tides
+        try:
+            save_model(tides, self.tide_cache_path)
+        except OSError as e:
+            log.warning("cannot write tide cache: %s", e)
+        log.info("tides refreshed (%s, %d events)", tides.station_name, len(tides.events))
+        return True
+
+    async def tide_refresh_loop(self) -> None:
+        while True:
+            ok = await self.tide_refresh_once()
+            # predictions are static: refetch rarely, retry sooner after a failure
+            await asyncio.sleep(self.cfg.tides_refresh_s if ok else min(600, self.cfg.tides_refresh_s))
+
+    def weather_payload(self, status: P.DeviceStatus) -> bytes | None:
         if self.model is None:
-            log.warning("no weather yet; answering NO_CHANGE")
+            log.warning("no weather yet; weather slot not sent")
             return None
         from .render import render, to_planes
 
         rcfg = make_render_config(self.cfg)
         return to_planes(render(self.model, status, rcfg), rcfg)
 
-    async def get_payload(self, status: P.DeviceStatus) -> bytes | None:
-        try:
-            return await asyncio.to_thread(self.payload_sync, status)
-        except Exception:  # noqa: BLE001
-            log.exception("render failed; answering NO_CHANGE")
+    def tide_payload(self, status: P.DeviceStatus) -> bytes | None:
+        if not self.cfg.tides_enabled or self.tides is None:
             return None
+        from .render import to_planes
+        from .render_tide import render_tide
+
+        rcfg = make_render_config(self.cfg)
+        # Predictions stay valid for days: only flag them stale after a day without a refetch.
+        tcfg = dataclasses.replace(rcfg, stale_after=TIDE_STALE_AFTER)
+        return to_planes(render_tide(self.tides, status, tcfg, tz=make_tide_config(self.cfg).tz), rcfg)
+
+    def payload_sync(self, status: P.DeviceStatus) -> dict[int, bytes | None]:
+        out: dict[int, bytes | None] = {}
+        for slot, fn in ((P.SLOT_WEATHER, self.weather_payload), (P.SLOT_TIDE, self.tide_payload)):
+            try:
+                out[slot] = fn(status)
+            except Exception:  # noqa: BLE001 - one broken view must not block the other
+                log.exception("render of slot %d failed; slot not sent", slot)
+                out[slot] = None
+        return out
+
+    async def get_payload(self, status: P.DeviceStatus) -> dict[int, bytes | None]:
+        return await asyncio.to_thread(self.payload_sync, status)
 
 
 def _settings(cfg: Config):
@@ -182,24 +232,36 @@ async def cmd_run(cfg: Config, once: bool) -> int:
         # one-shot push: make sure we have fresh data if the cache is empty
         if state.model is None:
             await state.refresh_once()
+        if cfg.tides_enabled and state.tides is None:
+            await state.tide_refresh_once()
         res = await ble.run(once=True)
         return 0 if res is not None else 1
 
-    refresher = asyncio.create_task(state.refresh_loop())
+    tasks = [asyncio.create_task(state.refresh_loop())]
+    if cfg.tides_enabled:
+        tasks.append(asyncio.create_task(state.tide_refresh_loop()))
     try:
         await ble.run()
     finally:
-        refresher.cancel()
+        for t in tasks:
+            t.cancel()
     return 0
 
 
-def cmd_preview(cfg: Config, out: str) -> int:
+def cmd_preview(cfg: Config, out: str, view: str = "weather") -> int:
     from .render import render
 
     state = State(cfg)
-    model = state.fetch_sync()
     status = P.DeviceStatus(P.PROTO_VERSION, (0, 0, 0), 4000, 85, 0, 0, 0, cfg.ble.poll_interval_s, 0)
-    img = render(model, status, make_render_config(cfg))
+    if view == "tide":
+        from .render_tide import render_tide
+        from .tides import fetch_tides
+
+        tcfg = make_tide_config(cfg)
+        rcfg = dataclasses.replace(make_render_config(cfg), stale_after=TIDE_STALE_AFTER)
+        img = render_tide(fetch_tides(tcfg), status, rcfg, tz=tcfg.tz)
+    else:
+        img = render(state.fetch_sync(), status, make_render_config(cfg))
     img.save(out)
     print(f"wrote {out}")
     return 0
@@ -279,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("run", help="run the daemon")
     pv = sub.add_parser("preview", help="fetch + render to a PNG (no BLE)")
     pv.add_argument("--out", required=True)
+    pv.add_argument("--view", choices=("weather", "tide"), default="weather")
     sc = sub.add_parser("scan", help="list nearby WxPaper devices")
     sc.add_argument("--seconds", type=float, default=15.0)
     sub.add_parser("push", help="wait for the device, push once, exit")
@@ -302,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
             with ble_lock(cfg):
                 return asyncio.run(cmd_run(cfg, once=True))
         if args.cmd == "preview":
-            return cmd_preview(cfg, args.out)
+            return cmd_preview(cfg, args.out, args.view)
         if args.cmd == "testpattern":
             if args.out:
                 return asyncio.run(cmd_testpattern(cfg, args.out))

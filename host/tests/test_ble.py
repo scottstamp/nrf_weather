@@ -27,20 +27,23 @@ class FakeDevice:
 
     def __init__(self, mtu=247, displayed_crc=0, interval=1800):
         self._mtu = mtu
-        self.status = P.DeviceStatus(1, (1, 2, 3), 3950, 80, 0, displayed_crc, 1234, interval, 7)
+        self.status = P.DeviceStatus(P.PROTO_VERSION, (1, 2, 3), 3950, 80, 0, displayed_crc, 1234, interval, 7,
+                                     tide_crc=0, view=0, num_slots=2)
         self.connected = True
         self.rx = bytearray()
         self.began = False
         self.exp_len = 0
         self.exp_crc = 0
         self.seq_err = False
-        self.committed: bytes | None = None
+        self.committed: bytes | None = None  # slot 0
+        self.slots: dict[int, bytes] = {}
+        self.slot = 0
         self.no_change_time: int | None = None
         self.log: list[str] = []
         # fault injection
         self.corrupt_first_chunk = False  # flips a bit in first Data write, first transfer only
         self.skip_chunk_once: int | None = None  # drop the Nth chunk of the first transfer
-        self.drop_ack_on_final = False  # raise DisconnectedError from the COMMIT/NO_CHANGE write
+        self.drop_ack_on_final = False  # raise DisconnectedError from the DONE write
         self.data_responses: list[bool] = []
         self._begins = 0
 
@@ -60,9 +63,13 @@ class FakeDevice:
         self._chk()
         op = data[0]
         if op == P.OP_BEGIN:
-            if len(data) != 14:
+            if len(data) not in (14, 15):
                 raise AttError(P.ERR_BAD_LENGTH)
             total, crc, fmt, _t = struct.unpack_from("<IIBI", data, 1)
+            slot = data[14] if len(data) == 15 else 0
+            if slot >= self.status.num_slots:
+                raise AttError(P.ERR_BAD_VALUE)
+            self.slot = slot
             if total != P.PAYLOAD_BYTES:
                 raise AttError(P.ERR_BAD_LENGTH)
             if fmt != P.FORMAT_RAW:
@@ -81,17 +88,19 @@ class FakeDevice:
                 raise AttError(P.ERR_BAD_LENGTH)
             if P.crc32(bytes(self.rx)) != self.exp_crc:
                 raise AttError(P.ERR_CRC)
-            self.committed = bytes(self.rx)
-            self.status.displayed_crc = self.exp_crc
-            self.log.append("COMMIT")
-            self.connected = False  # device disconnects, then refreshes
-            if self.drop_ack_on_final:
-                raise DisconnectedError("lost ack")
-        elif op == P.OP_NO_CHANGE:
+            self.slots[self.slot] = bytes(self.rx)
+            if self.slot == 0:
+                self.committed = bytes(self.rx)
+                self.status.displayed_crc = self.exp_crc
+            else:
+                self.status.tide_crc = self.exp_crc
+            self.began = False
+            self.log.append("COMMIT" if self.slot == 0 else f"COMMIT {self.slot}")
+        elif op == P.OP_DONE:
             if len(data) != 5:
                 raise AttError(P.ERR_BAD_LENGTH)
             self.no_change_time = struct.unpack_from("<I", data, 1)[0]
-            self.log.append("NO_CHANGE")
+            self.log.append("DONE")
             self.connected = False
             if self.drop_ack_on_final:
                 raise DisconnectedError("lost ack")
@@ -137,11 +146,15 @@ def run(coro):
 
 
 def test_status_roundtrip():
-    s = P.DeviceStatus(1, (1, 2, 3), 3999, None, P.FLAG_LOW_BATT | P.FLAG_NO_IMAGE, 0xDEADBEEF, 99, 1800, 5)
+    s = P.DeviceStatus(2, (1, 2, 3), 3999, None, P.FLAG_LOW_BATT | P.FLAG_NO_IMAGE, 0xDEADBEEF, 99, 1800, 5,
+                       tide_crc=0x12345678, view=1, num_slots=2)
     raw = s.pack()
-    assert len(raw) == 24
+    assert len(raw) == 32
     assert P.DeviceStatus.parse(raw) == s
-    assert s.low_battery
+    assert s.low_battery and s.slot_crc(1) == 0x12345678
+    # v1 (24-byte) status still parses: one slot
+    v1 = P.DeviceStatus.parse(raw[:24])
+    assert v1.num_slots == 1 and v1.tide_crc == 0 and v1.displayed_crc == 0xDEADBEEF
 
 
 def test_happy_path_upload():
@@ -149,7 +162,7 @@ def test_happy_path_upload():
     r = run(run_session(dev, lambda st: pl, clock=lambda: 1000))
     assert r.outcome == "uploaded" and r.attempts == 1
     assert dev.committed == pl and dev.status.displayed_crc == P.crc32(pl)
-    assert dev.log == ["BEGIN", "COMMIT"]
+    assert dev.log == ["BEGIN", "COMMIT", "DONE"]
     assert set(dev.data_responses) == {False}
     assert len(dev.data_responses) == 40  # 242 B per chunk at MTU 247
 
@@ -171,13 +184,13 @@ def test_no_change_when_crc_matches():
     dev = FakeDevice(displayed_crc=P.crc32(pl))
     r = run(run_session(dev, lambda st: pl, clock=lambda: 4242))
     assert r.outcome == "no_change"
-    assert dev.log == ["NO_CHANGE"] and dev.no_change_time == 4242 and dev.committed is None
+    assert dev.log == ["DONE"] and dev.no_change_time == 4242 and dev.committed is None
 
 
 def test_no_payload_answers_no_change():
     dev = FakeDevice()
     r = run(run_session(dev, lambda st: None))
-    assert r.outcome == "no_change" and dev.log == ["NO_CHANGE"]
+    assert r.outcome == "no_change" and dev.log == ["DONE"]
 
 
 def test_wrong_size_payload_rejected():
@@ -191,7 +204,7 @@ def test_crc_error_then_retry_success():
     r = run(run_session(dev, lambda st: pl))
     assert r.outcome == "uploaded" and r.attempts == 2
     assert dev.committed == pl
-    assert dev.log == ["BEGIN", "BEGIN", "COMMIT"]
+    assert dev.log == ["BEGIN", "BEGIN", "COMMIT", "DONE"]
     # retry uses write-with-response
     assert dev.data_responses[-1] is True and dev.data_responses[0] is False
 
@@ -236,14 +249,14 @@ def test_mtu_chunking(mtu, expected_chunks):
     assert len(dev.data_responses) == expected_chunks
 
 
-def test_disconnect_after_commit_is_success():
+def test_disconnect_on_done_after_upload_is_success():
     dev, pl = FakeDevice(), payload()
     dev.drop_ack_on_final = True
     r = run(run_session(dev, lambda st: pl))
     assert r.outcome == "uploaded" and r.link_dropped_on_final and dev.committed == pl
 
 
-def test_disconnect_after_no_change_is_success():
+def test_disconnect_on_done_without_upload_is_success():
     pl = payload()
     dev = FakeDevice(displayed_crc=P.crc32(pl))
     dev.drop_ack_on_final = True
@@ -265,6 +278,31 @@ def test_disconnect_mid_transfer_fails():
     dev.write_data = flaky
     with pytest.raises(DisconnectedError):
         run(run_session(dev, lambda st: pl))
+
+
+def test_two_slots_only_changed_ones_sent():
+    w, t = payload(1), payload(5)
+    dev = FakeDevice()
+    r = run(run_session(dev, lambda st: {P.SLOT_WEATHER: w, P.SLOT_TIDE: t}))
+    assert r.outcome == "uploaded" and r.uploaded_slots == (0, 1)
+    assert dev.log == ["BEGIN", "COMMIT", "BEGIN", "COMMIT 1", "DONE"]
+    assert dev.slots == {0: w, 1: t}
+    # next contact: only the tide image changed
+    t2 = payload(7)
+    dev.connected, dev.log = True, []
+    r = run(run_session(dev, lambda st: {P.SLOT_WEATHER: w, P.SLOT_TIDE: t2}))
+    assert r.uploaded_slots == (1,) and dev.log == ["BEGIN", "COMMIT 1", "DONE"] and dev.slots[1] == t2
+    # nothing changed; a missing tide payload (fetch failed) leaves the stored one alone
+    dev.connected, dev.log = True, []
+    r = run(run_session(dev, lambda st: {P.SLOT_WEATHER: w, P.SLOT_TIDE: None}))
+    assert r.outcome == "no_change" and dev.log == ["DONE"] and dev.slots[1] == t2
+
+
+def test_single_slot_device_skips_tide():
+    dev = FakeDevice()
+    dev.status.num_slots = 1
+    r = run(run_session(dev, lambda st: {P.SLOT_WEATHER: payload(1), P.SLOT_TIDE: payload(2)}))
+    assert r.uploaded_slots == (0,) and dev.log == ["BEGIN", "COMMIT", "DONE"]
 
 
 def test_set_interval_only_when_different():

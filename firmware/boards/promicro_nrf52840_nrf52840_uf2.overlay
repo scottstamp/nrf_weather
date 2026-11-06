@@ -11,7 +11,10 @@
  *   RST       ->  P1.00 (D6)
  *   BUSY      ->  P0.11 (D7)
  *
- * Poll button: momentary switch between P1.04 (D8) and GND (internal pull-up).
+ * Buttons: momentary switches to GND (internal pull-ups, active low):
+ *   POLL    -> P1.04 (D8)   poll the host now
+ *   WEATHER -> P1.06 (D9)   show weather view
+ *   TIDE    -> P1.11 (D14)  show tide view
  */
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 
@@ -39,6 +42,15 @@
 		poll_button: poll_button {
 			gpios = <&gpio1 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			label = "Poll";
+		};
+		/* Press = show the weather / tide view (redrawn from images stored on the device). */
+		weather_button: weather_button {
+			gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Weather view";
+		};
+		tide_button: tide_button {
+			gpios = <&gpio1 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Tide view";
 		};
 	};
 
@@ -102,10 +114,10 @@
 &wdt0 { status = "okay"; };
 
 /*
- * Edge detection for the button via the GPIO SENSE/PORT mechanism instead of a
+ * Edge detection for the buttons via the GPIO SENSE/PORT mechanism instead of a
  * GPIOTE IN channel: GPIOTE IN events keep extra clocks running (~tens of uA),
  * SENSE costs ~nothing in System ON idle.
  */
 &gpio1 {
-	sense-edge-mask = <(1 << 4)>;
+	sense-edge-mask = <((1 << 4) | (1 << 6) | (1 << 11))>;
 };

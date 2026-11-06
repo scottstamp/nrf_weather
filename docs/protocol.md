@@ -1,14 +1,16 @@
-# BLE Protocol v1 (device ⇄ host)
+# BLE Protocol v2 (device ⇄ host)
 
 Single source of truth for `firmware/src/wx_service.c` and `host/wxd/protocol.py` / `host/wxd/ble.py`.
-All multi-byte integers are **little-endian**. Version byte = `1`.
+All multi-byte integers are **little-endian**. Version byte = `2`.
+
+**v2 (2026-11-06)** adds image *slots*: the device stores one image per view (slot 0 = weather, slot 1 = tide) and its view buttons switch between them locally. Changes from v1: Status is 32 bytes (adds `slot1_crc`, `view`, `num_slots`), BEGIN takes a slot byte, COMMIT no longer ends the session, and opcode `0x03` (v1 `NO_CHANGE`) is now `DONE`, which ends every session.
 
 ## Roles & timing
 
 - Device: BLE **peripheral**, GATT server. Host: **central**, GATT client.
 - Device sleeps; every poll interval (default 600 s) it advertises **connectable, 100 ms interval, for ≤ 30 s**.
 - Host scans continuously (passive is enough; name + UUID are in the primary ADV PDU), connects as soon as it sees the device.
-- After connect the host should finish within **20 s**. The device disconnects on: successful `COMMIT`, `NO_CHANGE`, or 20 s with no GATT activity.
+- After connect the host should finish within **20 s** of inactivity per step. The device disconnects on `DONE` or after 20 s with no GATT activity.
 - Device requests connection interval 7.5–15 ms, latency 0, supervision timeout 4 s, 2M PHY, data length 251. The host should exchange MTU (BlueZ does this automatically; aim for 247).
 
 ## Advertising
@@ -27,23 +29,27 @@ All multi-byte integers are **little-endian**. Version byte = `1`.
 | Control | `7a1e0003-5c3b-4f2a-9e0d-2b6f8c4d1a90` | Write (with response) |
 | Data    | `7a1e0004-5c3b-4f2a-9e0d-2b6f8c4d1a90` | Write Without Response, Write |
 
-### Status (read, 24 bytes)
+### Status (read, 32 bytes)
 
 | Off | Type | Field | Notes |
 |-----|------|-------|-------|
-| 0 | u8  | proto_version | `1` |
+| 0 | u8  | proto_version | `2` |
 | 1 | u8  | fw_major | |
 | 2 | u8  | fw_minor | |
 | 3 | u8  | fw_patch | |
 | 4 | u16 | battery_mv | VDDH (battery) in mV, 0 = unknown |
 | 6 | u8  | battery_pct | 0–100 LiPo estimate, 255 = unknown |
 | 7 | u8  | flags | bit0 `STALE_SHOWN`, bit1 `LOW_BATT`, bit2 `NO_IMAGE` (never received one), bit3 `REFRESH_FAILED` (last BUSY timeout), bit4 `CHARGING`/USB present (if detectable) |
-| 8 | u32 | displayed_crc | CRC32 of host image on the panel; **0** if none or if the device has drawn an overlay over it |
+| 8 | u32 | slot0_crc | CRC32 of the stored **weather** image; **0** if none (v1: `displayed_crc`) |
 | 12 | u32 | uptime_s | |
 | 16 | u32 | poll_interval_s | current interval |
 | 20 | u32 | refresh_count | full refreshes since boot |
+| 24 | u32 | slot1_crc | CRC32 of the stored **tide** image; **0** if none |
+| 28 | u8  | view | slot currently selected for display (0 weather, 1 tide) |
+| 29 | u8  | num_slots | `2` |
+| 30 | u16 | reserved | 0 |
 
-Host rule: if `displayed_crc == crc32(new_payload)` → send `NO_CHANGE`; otherwise upload.
+Host rule: for each slot, upload only if `slotN_crc != crc32(new_payload)`; then send `DONE`. The CRCs describe the stored images, not the panel: overlays (OFFLINE, LOW BATTERY) are composed on the device at draw time and never change a slot, so the host never needs to resend to clear one. A slot the host has no data for (e.g. tide fetch failed) is simply not sent; the device keeps its previous image.
 
 ### Control (write with response)
 
@@ -51,12 +57,12 @@ First byte is the opcode.
 
 | Op | Name | Args (after opcode) | Effect |
 |----|------|---------------------|--------|
-| `0x01` | BEGIN | u32 total_len, u32 crc32, u8 format, u32 unix_time | Start an image transfer. `total_len` must be 9472 and `format` must be 0 (raw planes). Resets receive offset to 0. |
-| `0x02` | COMMIT | — | Validate length + CRC. On success: device disconnects, then does a full panel refresh. |
-| `0x03` | NO_CHANGE | u32 unix_time | Nothing to draw. Device records contact time and disconnects. |
+| `0x01` | BEGIN | u32 total_len, u32 crc32, u8 format, u32 unix_time, u8 slot | Start an image transfer into `slot` (0 weather, 1 tide; omitted = 0). `total_len` must be 9472 and `format` must be 0 (raw planes). Resets receive offset to 0. |
+| `0x02` | COMMIT | — | Validate length + CRC. On success the image replaces the slot's stored image; the session continues (next BEGIN or DONE). |
+| `0x03` | DONE | u32 unix_time | End of session (v1 name `NO_CHANGE`). Device records contact time and disconnects; then it refreshes the panel if the shown view's composed image changed. |
 | `0x04` | SET_INTERVAL | u32 seconds | 60 ≤ s ≤ 86400 (60 s is for debugging; production 600). Takes effect from the next sleep. Not persisted across reset in v1. |
 
-Ordering: `SET_INTERVAL` may be written at any point before the final op (the host sends it right after reading Status); the device drops the link ~150 ms after a successful `COMMIT`/`NO_CHANGE`, so anything after the final op is lost. `displayed_crc == 0` means "no known image" — the host never sends `NO_CHANGE` against 0.
+Ordering: `SET_INTERVAL` may be written at any point before `DONE` (the host sends it right after reading Status); the device drops the link ~150 ms after `DONE`, so anything after it is lost. `slotN_crc == 0` means "no image" — the host always uploads against 0. If the link drops after a COMMIT but before DONE, the committed slot is kept and the device still redraws if needed (it just doesn't count it as host contact).
 
 `unix_time` = host's UTC seconds; the device uses it only to track "time since last contact" (stale detection is uptime-based, so it doesn't need a calendar).
 
@@ -72,7 +78,7 @@ Errors are returned as ATT application errors on the Control write:
 
 On any error the host may retry once from BEGIN, using write-*with*-response for the Data chunks. Data writes never fail, with or without response: problems (no BEGIN, out-of-order offset, overflow past 9472) are latched and reported by COMMIT as `0x82` / `0x84`.
 
-BlueZ/bleak surfaces these as a D-Bus error containing `ATT error: 0x8N` (host maps it in `ble.map_bleak_exception`; to be confirmed on hardware). A device-initiated disconnect racing the COMMIT response is treated as success by the host; if the commit had actually failed, the next poll's `displayed_crc` mismatch causes a resend.
+BlueZ/bleak surfaces these as a D-Bus error containing `ATT error: 0x8N` (host maps it in `ble.map_bleak_exception`; to be confirmed on hardware). A device-initiated disconnect racing the DONE response is treated as success by the host (all slots were committed and acked before it).
 
 ### Data (write without response)
 
@@ -102,14 +108,12 @@ device                             host
   | <------- CONNECT_IND ---------  |
   | <-- MTU / DLE / PHY exchange -> |
   | <------ read Status ----------  |
-  |                                 | render(model, status) -> payload, crc
-  |                                 | if crc == displayed_crc:
-  | <---- write Control NO_CHANGE - |
+  |                                 | render weather + tide -> payloads, crcs
+  |                                 | for each slot whose crc != slotN_crc:
+  | <---- BEGIN (slot) -----------  |
+  | <---- Data chunks (WwoR) -----  |    ~40 x 244 B
+  | <---- COMMIT -----------------  |
+  | <---- DONE -------------------  |
   | ---------- disconnect ------->  |
-  |                                 | else:
-  | <---- write Control BEGIN ----  |
-  | <---- Data chunks (WwoR) -----  |  ~40 x 244 B
-  | <---- write Control COMMIT ---  |
-  | ---------- disconnect ------->  |
-  | (refresh panel ~15-25 s)        |
+  | compose(view) + overlays; if CRC differs from the panel: refresh (~20 s)
 ```

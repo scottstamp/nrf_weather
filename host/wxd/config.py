@@ -25,6 +25,10 @@ class Config:
     render: dict[str, Any] = field(default_factory=lambda: {"rotate": 90, "red_invert": False})
     ble: BleConfig = field(default_factory=BleConfig)
     refresh_s: int = 600
+    # [tides]: enabled + refresh_s, the rest is passed through to tides.TideConfig.
+    tides: dict[str, Any] = field(default_factory=dict)
+    tides_enabled: bool = True
+    tides_refresh_s: int = 3 * 3600
     cache_dir: Path = field(default_factory=lambda: default_cache_dir())
     source_path: Path | None = None
 
@@ -51,6 +55,12 @@ def parse_config(data: dict[str, Any]) -> Config:
     wx = dict(data.get("weather", {}))
     cfg.refresh_s = int(wx.pop("refresh_s", cfg.refresh_s))
     cfg.weather = wx
+    td = dict(data.get("tides", {}))
+    cfg.tides_enabled = bool(td.pop("enabled", cfg.tides_enabled))
+    cfg.tides_refresh_s = int(td.pop("refresh_s", cfg.tides_refresh_s))
+    cfg.tides = td
+    if cfg.tides_refresh_s < 60:
+        raise ValueError("tides.refresh_s must be >= 60")
     if "render" in data:
         cfg.render = {**cfg.render, **data["render"]}
     b = data.get("ble", {})
@@ -97,3 +107,10 @@ def make_render_config(cfg: Config) -> Any:
     from .render import RenderConfig
 
     return _filtered(RenderConfig, cfg.render)
+
+
+def make_tide_config(cfg: Config) -> Any:
+    """Build tides.TideConfig (lazy import) from [tides]; unknown keys ignored."""
+    from .tides import TideConfig
+
+    return _filtered(TideConfig, cfg.tides)

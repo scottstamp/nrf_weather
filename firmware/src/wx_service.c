@@ -1,5 +1,5 @@
 /*
- * BLE peripheral + GATT service implementing docs/protocol.md (v1).
+ * BLE peripheral + GATT service implementing docs/protocol.md (v2).
  *
  * Threading: GATT callbacks run in the BT RX thread; the main thread blocks
  * in wx_poll() on a semaphore that is given when the link goes down. The
@@ -28,7 +28,7 @@ LOG_MODULE_REGISTER(wx_svc, LOG_LEVEL_INF);
 
 #define OP_BEGIN        0x01
 #define OP_COMMIT       0x02
-#define OP_NO_CHANGE    0x03
+#define OP_DONE         0x03 /* v1 name: NO_CHANGE */
 #define OP_SET_INTERVAL 0x04
 
 #define ERR_BAD_LENGTH 0x80
@@ -54,12 +54,16 @@ struct status_pdu {
 	uint16_t battery_mv;
 	uint8_t battery_pct;
 	uint8_t flags;
-	uint32_t displayed_crc;
+	uint32_t slot0_crc; /* weather image stored on the device (0 = none) */
 	uint32_t uptime_s;
 	uint32_t poll_interval_s;
 	uint32_t refresh_count;
+	uint32_t slot1_crc; /* tide image stored on the device (0 = none) */
+	uint8_t view;       /* slot currently selected for display */
+	uint8_t num_slots;
+	uint16_t reserved;
 } __packed;
-BUILD_ASSERT(sizeof(struct status_pdu) == 24, "Status PDU must be 24 bytes");
+BUILD_ASSERT(sizeof(struct status_pdu) == 32, "Status PDU must be 32 bytes");
 
 /* Receive state (one transfer at a time) */
 static uint8_t rx_buf[FB_BYTES];
@@ -67,9 +71,12 @@ static size_t rx_len;
 static uint32_t rx_expect_crc;
 static bool rx_begun;
 static bool rx_seq_err;
+static uint8_t rx_slot;
 
-/* Committed image */
-static uint32_t committed_crc;
+/* Committed images, one per view. Written only by COMMIT (BT thread, during wx_poll). */
+static uint8_t slot_buf[WX_NUM_SLOTS][FB_BYTES];
+static uint32_t slot_crc[WX_NUM_SLOTS];
+static bool slot_valid[WX_NUM_SLOTS];
 
 static struct wx_status status;
 static uint32_t poll_interval_s = CONFIG_WX_POLL_INTERVAL_S;
@@ -147,10 +154,13 @@ static ssize_t status_read(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		.battery_mv = sys_cpu_to_le16(status.battery_mv),
 		.battery_pct = status.battery_pct,
 		.flags = status.flags,
-		.displayed_crc = sys_cpu_to_le32(status.displayed_crc),
+		.slot0_crc = sys_cpu_to_le32(slot_crc[0]),
 		.uptime_s = sys_cpu_to_le32((uint32_t)(k_uptime_get() / 1000)),
 		.poll_interval_s = sys_cpu_to_le32(poll_interval_s),
 		.refresh_count = sys_cpu_to_le32(status.refresh_count),
+		.slot1_crc = sys_cpu_to_le32(slot_crc[1]),
+		.view = status.view,
+		.num_slots = WX_NUM_SLOTS,
 	};
 
 	touch();
@@ -169,9 +179,14 @@ static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *at
 
 	switch (p[0]) {
 	case OP_BEGIN: {
-		/* u32 total_len, u32 crc32, u8 format, u32 unix_time */
-		if (len != 14) {
+		/* u32 total_len, u32 crc32, u8 format, u32 unix_time, [u8 slot] */
+		if (len != 14 && len != 15) {
 			return BT_GATT_ERR(ERR_BAD_LENGTH);
+		}
+		uint8_t slot = len == 15 ? p[14] : 0;
+
+		if (slot >= WX_NUM_SLOTS) {
+			return BT_GATT_ERR(ERR_BAD_VALUE);
 		}
 		uint32_t total = sys_get_le32(&p[1]);
 
@@ -184,8 +199,9 @@ static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *at
 		rx_expect_crc = sys_get_le32(&p[5]);
 		rx_len = 0;
 		rx_seq_err = false;
+		rx_slot = slot;
 		rx_begun = true;
-		LOG_INF("BEGIN crc=%08x", rx_expect_crc);
+		LOG_INF("BEGIN slot %u crc=%08x", slot, rx_expect_crc);
 		return len;
 	}
 	case OP_COMMIT: {
@@ -210,17 +226,21 @@ static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *at
 			LOG_WRN("CRC mismatch %08x != %08x", crc, rx_expect_crc);
 			return BT_GATT_ERR(ERR_CRC);
 		}
-		committed_crc = crc;
-		LOG_INF("COMMIT ok");
-		finish(WX_POLL_NEW_IMAGE);
+		memcpy(slot_buf[rx_slot], rx_buf, FB_BYTES);
+		slot_crc[rx_slot] = crc;
+		slot_valid[rx_slot] = true;
+		/* Session continues: the host may send the other slot, then DONE. */
+		session_result = WX_POLL_NEW_IMAGE;
+		LOG_INF("COMMIT slot %u ok", rx_slot);
 		return len;
 	}
-	case OP_NO_CHANGE:
+	case OP_DONE:
 		if (len != 5) {
 			return BT_GATT_ERR(ERR_BAD_LENGTH);
 		}
-		LOG_INF("NO_CHANGE");
-		finish(WX_POLL_NO_CHANGE);
+		LOG_INF("DONE");
+		finish(session_result == WX_POLL_NEW_IMAGE ? WX_POLL_NEW_IMAGE
+							   : WX_POLL_NO_CHANGE);
 		return len;
 	case OP_SET_INTERVAL: {
 		if (len != 5) {
@@ -383,10 +403,14 @@ uint32_t wx_poll_interval_s(void)
 	return poll_interval_s;
 }
 
-uint32_t wx_take_image(uint8_t *dst)
+const uint8_t *wx_slot(int slot, uint32_t *crc)
 {
-	memcpy(dst, rx_buf, FB_BYTES);
-	return committed_crc;
+	if (slot < 0 || slot >= WX_NUM_SLOTS || !slot_valid[slot]) {
+		*crc = 0;
+		return NULL;
+	}
+	*crc = slot_crc[slot];
+	return slot_buf[slot];
 }
 
 enum wx_poll_result wx_poll(void)

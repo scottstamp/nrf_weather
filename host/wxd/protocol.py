@@ -1,4 +1,4 @@
-"""BLE protocol v1 constants and codecs. Spec: docs/protocol.md (keep in sync with firmware)."""
+"""BLE protocol v2 constants and codecs. Spec: docs/protocol.md (keep in sync with firmware)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,12 @@ import struct
 import zlib
 from dataclasses import dataclass
 
-PROTO_VERSION = 1
+PROTO_VERSION = 2
+
+# Image slots = device views (v2). The device stores one image per slot and its
+# view buttons switch between them without host contact.
+SLOT_WEATHER = 0
+SLOT_TIDE = 1
 
 DEVICE_NAME = "WxPaper"
 SERVICE_UUID = "7a1e0001-5c3b-4f2a-9e0d-2b6f8c4d1a90"
@@ -27,7 +32,8 @@ MAX_INTERVAL_S = 86400
 
 OP_BEGIN = 0x01
 OP_COMMIT = 0x02
-OP_NO_CHANGE = 0x03
+OP_DONE = 0x03  # v1 name: NO_CHANGE
+OP_NO_CHANGE = OP_DONE
 OP_SET_INTERVAL = 0x04
 
 ERR_BAD_LENGTH = 0x80
@@ -42,8 +48,10 @@ FLAG_NO_IMAGE = 1 << 2
 FLAG_REFRESH_FAILED = 1 << 3
 FLAG_CHARGING = 1 << 4
 
-_STATUS_FMT = "<BBBBHBBIIII"
-STATUS_LEN = struct.calcsize(_STATUS_FMT)  # 24
+_STATUS_FMT_V1 = "<BBBBHBBIIII"
+STATUS_LEN_V1 = struct.calcsize(_STATUS_FMT_V1)  # 24
+_STATUS_FMT = _STATUS_FMT_V1 + "IBBH"  # + slot1_crc, view, num_slots, reserved
+STATUS_LEN = struct.calcsize(_STATUS_FMT)  # 32
 
 
 @dataclass
@@ -53,10 +61,16 @@ class DeviceStatus:
     battery_mv: int  # 0 = unknown
     battery_pct: int | None  # None = unknown
     flags: int
-    displayed_crc: int
+    displayed_crc: int  # v2: CRC of the weather image (slot 0) stored on the device, 0 = none
     uptime_s: int
     poll_interval_s: int
     refresh_count: int
+    tide_crc: int = 0  # CRC of the tide image (slot 1) stored on the device, 0 = none
+    view: int = SLOT_WEATHER  # slot currently selected for display
+    num_slots: int = 1
+
+    def slot_crc(self, slot: int) -> int:
+        return (self.displayed_crc, self.tide_crc)[slot] if 0 <= slot < 2 else 0
 
     @property
     def low_battery(self) -> bool:
@@ -64,11 +78,15 @@ class DeviceStatus:
 
     @classmethod
     def parse(cls, data: bytes) -> "DeviceStatus":
-        if len(data) < STATUS_LEN:
-            raise ValueError(f"status too short: {len(data)} < {STATUS_LEN}")
+        if len(data) < STATUS_LEN_V1:
+            raise ValueError(f"status too short: {len(data)} < {STATUS_LEN_V1}")
         (ver, fmaj, fmin, fpat, mv, pct, flags, crc, up, interval, refreshes) = struct.unpack_from(
-            _STATUS_FMT, data
+            _STATUS_FMT_V1, data
         )
+        ext = {}
+        if len(data) >= STATUS_LEN:
+            tide, view, nslots, _ = struct.unpack_from("<IBBH", data, STATUS_LEN_V1)
+            ext = dict(tide_crc=tide, view=view, num_slots=nslots)
         return cls(
             proto_version=ver,
             fw_version=(fmaj, fmin, fpat),
@@ -79,6 +97,7 @@ class DeviceStatus:
             uptime_s=up,
             poll_interval_s=interval,
             refresh_count=refreshes,
+            **ext,
         )
 
     def pack(self) -> bytes:
@@ -94,6 +113,10 @@ class DeviceStatus:
             self.uptime_s,
             self.poll_interval_s,
             self.refresh_count,
+            self.tide_crc,
+            self.view,
+            self.num_slots,
+            0,
         )
 
 
@@ -101,16 +124,22 @@ def crc32(payload: bytes) -> int:
     return zlib.crc32(payload) & 0xFFFFFFFF
 
 
-def op_begin(crc: int, unix_time: int, total_len: int = PAYLOAD_BYTES, fmt: int = FORMAT_RAW) -> bytes:
-    return struct.pack("<BIIBI", OP_BEGIN, total_len, crc, fmt, unix_time)
+def op_begin(
+    crc: int, unix_time: int, slot: int = SLOT_WEATHER, total_len: int = PAYLOAD_BYTES, fmt: int = FORMAT_RAW
+) -> bytes:
+    return struct.pack("<BIIBIB", OP_BEGIN, total_len, crc, fmt, unix_time, slot)
 
 
 def op_commit() -> bytes:
     return bytes([OP_COMMIT])
 
 
-def op_no_change(unix_time: int) -> bytes:
-    return struct.pack("<BI", OP_NO_CHANGE, unix_time)
+def op_done(unix_time: int) -> bytes:
+    """End of session (v1: NO_CHANGE). The device disconnects after acking it."""
+    return struct.pack("<BI", OP_DONE, unix_time)
+
+
+op_no_change = op_done
 
 
 def op_set_interval(seconds: int) -> bytes:

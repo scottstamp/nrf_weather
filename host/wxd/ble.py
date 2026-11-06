@@ -71,7 +71,9 @@ class GattClient(Protocol):
         """Raises AttError / DisconnectedError."""
 
 
-GetPayload = Callable[[P.DeviceStatus], Union[bytes, None, Awaitable[Union[bytes, None]]]]
+# Returns the weather payload (bytes), None (nothing to send), or {slot: payload | None}.
+Payloads = Union[bytes, None, dict[int, Union[bytes, None]]]
+GetPayload = Callable[[P.DeviceStatus], Union[Payloads, Awaitable[Payloads]]]
 Connector = Callable[[Any], "contextlib.AbstractAsyncContextManager[GattClient]"]
 
 _ATT_RE = re.compile(r"ATT error:?\s*0x([0-9a-fA-F]{2})|Application error:?\s*0x([0-9a-fA-F]{2})", re.I)
@@ -163,11 +165,12 @@ def bleak_connector(adapter: str | None = None, timeout: float = CONNECT_TIMEOUT
 class SessionResult:
     outcome: str  # "uploaded" | "no_change"
     status: P.DeviceStatus
-    crc: int | None
+    crc: int | None  # weather (slot 0) payload CRC, if one was rendered
     duration_s: float
-    attempts: int = 0
+    attempts: int = 0  # max attempts used by any uploaded slot
     reason: str = ""
-    link_dropped_on_final: bool = False  # device disconnected during final write (treated as success)
+    link_dropped_on_final: bool = False  # device disconnected during DONE (treated as success)
+    uploaded_slots: tuple[int, ...] = ()
 
 
 def chunk_size_for_mtu(mtu: int) -> int:
@@ -175,12 +178,12 @@ def chunk_size_for_mtu(mtu: int) -> int:
 
 
 async def _final_write(client: GattClient, data: bytes) -> bool:
-    """Write COMMIT / NO_CHANGE. Returns True if the link dropped instead of acking.
+    """Write DONE. Returns True if the link dropped instead of acking.
 
-    The device disconnects right after a successful COMMIT/NO_CHANGE, so depending on
-    timing the write response may be lost and the stack reports a disconnect. That is
-    success. (A real failure arrives as an AttError, which propagates.) A dropped link on
-    COMMIT is verified implicitly: next contact's displayed_crc will not match if it failed.
+    The device disconnects right after DONE, so depending on timing the write response
+    may be lost and the stack reports a disconnect. That is success. (A real failure
+    arrives as an AttError, which propagates.) Slots were already committed (and acked)
+    before DONE, so nothing is lost either way.
     """
     try:
         await client.write_control(data)
@@ -189,21 +192,29 @@ async def _final_write(client: GattClient, data: bytes) -> bool:
     return False
 
 
-async def _upload(client: GattClient, payload: bytes, crc: int, now: int, response: bool) -> bool:
+async def _upload(client: GattClient, slot: int, payload: bytes, crc: int, now: int, response: bool) -> None:
     mtu = client.mtu
     chunk = chunk_size_for_mtu(mtu)
     t0 = time.monotonic()
-    await client.write_control(P.op_begin(crc, now))
+    await client.write_control(P.op_begin(crc, now, slot))
     chunks = P.data_chunks(payload, chunk)
     for c in chunks:
         await client.write_data(c, response=response)
     t1 = time.monotonic()
-    dropped = await _final_write(client, P.op_commit())
+    await client.write_control(P.op_commit())
     log.info(
-        "upload: mtu=%d chunk=%d writes=%d rsp=%s data=%.2fs commit=%.2fs",
-        mtu, chunk, len(chunks), response, t1 - t0, time.monotonic() - t1,
+        "upload slot %d: mtu=%d chunk=%d writes=%d rsp=%s data=%.2fs commit=%.2fs",
+        slot, mtu, chunk, len(chunks), response, t1 - t0, time.monotonic() - t1,
     )
-    return dropped
+
+
+def _normalize_payloads(res: Any) -> dict[int, bytes]:
+    """get_payload may return bytes (weather slot only), None, or {slot: bytes | None}."""
+    if res is None:
+        return {}
+    if isinstance(res, (bytes, bytearray)):
+        return {P.SLOT_WEATHER: bytes(res)} if res else {}
+    return {int(k): bytes(v) for k, v in dict(res).items() if v}
 
 
 async def run_session(
@@ -226,31 +237,45 @@ async def run_session(
 
     res = get_payload(status)
     if inspect.isawaitable(res):
-        payload = await res
-    else:
-        payload = res
+        res = await res
+    payloads = _normalize_payloads(res)
     now = int(clock())
 
-    if not payload:
-        dropped = await _final_write(client, P.op_no_change(now))
-        return SessionResult("no_change", status, None, time.monotonic() - t0, reason="no payload", link_dropped_on_final=dropped)
-    if len(payload) != P.PAYLOAD_BYTES:
-        raise SessionError(f"payload is {len(payload)} bytes, want {P.PAYLOAD_BYTES}")
+    for slot, pl in payloads.items():
+        if len(pl) != P.PAYLOAD_BYTES:
+            raise SessionError(f"slot {slot} payload is {len(pl)} bytes, want {P.PAYLOAD_BYTES}")
+    weather_crc = P.crc32(payloads[P.SLOT_WEATHER]) if P.SLOT_WEATHER in payloads else None
 
-    crc = P.crc32(payload)
-    if status.displayed_crc != 0 and status.displayed_crc == crc:
-        dropped = await _final_write(client, P.op_no_change(now))
-        return SessionResult("no_change", status, crc, time.monotonic() - t0, reason="crc match", link_dropped_on_final=dropped)
+    uploaded: list[int] = []
+    max_attempts = 0
+    for slot in sorted(payloads):
+        if slot >= status.num_slots:
+            log.debug("device has no slot %d; skipped", slot)
+            continue
+        pl = payloads[slot]
+        crc = P.crc32(pl)
+        if status.slot_crc(slot) == crc:
+            continue
+        last: AttError | None = None
+        for attempt, response in ((1, False), (2, True)):
+            try:
+                await _upload(client, slot, pl, crc, now, response)
+                break
+            except AttError as e:
+                last = e
+                log.warning("slot %d upload attempt %d failed: %s", slot, attempt, e)
+        else:
+            raise SessionError(f"slot {slot} upload failed after retry: {last}")
+        uploaded.append(slot)
+        max_attempts = max(max_attempts, attempt)
 
-    last: AttError | None = None
-    for attempt, response in ((1, False), (2, True)):
-        try:
-            dropped = await _upload(client, payload, crc, now, response)
-            return SessionResult("uploaded", status, crc, time.monotonic() - t0, attempts=attempt, link_dropped_on_final=dropped)
-        except AttError as e:
-            last = e
-            log.warning("upload attempt %d failed: %s", attempt, e)
-    raise SessionError(f"upload failed after retry: {last}")
+    dropped = await _final_write(client, P.op_done(now))
+    dt = time.monotonic() - t0
+    if uploaded:
+        return SessionResult("uploaded", status, weather_crc, dt, attempts=max_attempts,
+                             link_dropped_on_final=dropped, uploaded_slots=tuple(uploaded))
+    reason = "crc match" if payloads else "no payload"
+    return SessionResult("no_change", status, weather_crc, dt, reason=reason, link_dropped_on_final=dropped)
 
 
 # ---------------------------------------------------------------- scanner / daemon
@@ -342,12 +367,14 @@ class WxBle:
             result = await asyncio.wait_for(self._session(device), self.s.connect_timeout_s + SESSION_TIMEOUT_S + 5)
             st = result.status
             log.info(
-                "session %s: %s crc=%s batt=%dmV/%s%% attempts=%d%s %.1fs",
+                "session %s: %s%s crc=%s batt=%dmV/%s%% view=%d attempts=%d%s %.1fs",
                 addr,
                 result.outcome,
+                f" slots={list(result.uploaded_slots)}" if result.uploaded_slots else "",
                 f"{result.crc:08x}" if result.crc is not None else "-",
                 st.battery_mv,
                 st.battery_pct if st.battery_pct is not None else "?",
+                st.view,
                 result.attempts,
                 " (link dropped on final write)" if result.link_dropped_on_final else "",
                 time.monotonic() - t0,

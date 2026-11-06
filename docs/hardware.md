@@ -22,7 +22,9 @@ Pins are chosen so they all sit on the left header (D2–D7) next to each other.
 | DC   | D5 | P0.24 | data/command |
 | RST  | D6 | P1.00 | reset (active low) |
 | BUSY | D7 | P0.11 | busy (active high) |
-| Poll button | D8 | P1.04 | momentary switch to **GND**; internal pull-up, active low |
+| POLL button | D8 | P1.04 | momentary switch to **GND**; internal pull-up, active low |
+| WEATHER button | D9 | P1.06 | momentary switch to **GND**; internal pull-up, active low |
+| TIDE button | D14 | P1.11 | momentary switch to **GND**; internal pull-up, active low |
 
 The SSD1680 is write-only here, so MISO isn't used. Run SPI at 4 MHz. The controller allows up to 20 MHz for writes, but short jumper wires are happier slower.
 
@@ -35,15 +37,26 @@ The SSD1680 is write-only here, so MISO isn't used. Run SPI at 4 MHz. The contro
 - **DCDC**: off by default. It needs the DCDC inductors on the board, and enabling it on a board without them stops the chip from running. It only saves current while active (radio, SPI), not in sleep, so the gain here is small. It's a Phase 5 item, to check against the board schematic.
 - **nice!nano LED / charger**: the blue charge LED only lights while charging. The user LED (P0.15) is used only for a 50 ms blink acknowledging a poll-button press; otherwise it is disconnected.
 
-## Poll button
+## Buttons
 
-A momentary push button between **D8 (P1.04)** and **GND** makes the device poll the host immediately. This works on battery, and no USB is needed. No external resistor is needed, because the internal pull-up is enabled.
+Three momentary push buttons, each between its pin and **GND**. No external resistors are needed, because the internal pull-ups are enabled. All three work on battery, and no USB is needed.
 
-- **While waiting:** the press is detected with the GPIO SENSE mechanism (`sense-edge-mask` in the overlay), so waiting for it costs essentially nothing in sleep.
-- **While held:** the pull-up draws about 250 µA, only while the button is pressed.
-- **On a press:** the user LED (P0.15) blinks for 50 ms. If there's new data, the panel refreshes about 20 s later. If there's no new data, the blink is the only feedback.
+| Button | nice!nano | nRF pin | Press |
+|--------|-----------|---------|-------|
+| POLL | D8 | P1.04 | Poll the host now (new weather/tide data, if any, is drawn ~20 s later) |
+| WEATHER | D9 | P1.06 | Show the weather view |
+| TIDE | D14 | P1.11 | Show the tide view (upcoming high/low tides, see `tides.md`) |
 
-A press during an ongoing poll or refresh is kept, and a new poll starts right after it.
+D8 and D9 are the last two pins of the left header, right below the panel wiring (D2–D7). D14 is on the right header. These pins were chosen to stay clear of the NFC pins (D10 = P0.09, D16 = P0.10) and the analog inputs (D19–D21), and all three are on GPIO port 1 so one SENSE mask covers them.
+
+- **While waiting:** presses are detected with the GPIO SENSE mechanism (`sense-edge-mask` on `&gpio1` in the overlay), so waiting costs essentially nothing in sleep.
+- **While held:** each pull-up draws about 250 µA, only while its button is pressed.
+- **Feedback:** every accepted press blinks the user LED (P0.15) for 50 ms. Debounce is 30 ms.
+- **View buttons:** the device keeps the latest weather and tide images in RAM (protocol v2 image slots), so switching redraws the panel straight away (one full refresh, ~20 s) without contacting the host. Pressing the button of the view already shown does nothing but blink. The selected view stays until the other button is pressed. Uploads for the hidden view are stored without a refresh. Before the host has ever sent a tide image, the tide view shows "TIDES / NO DATA YET". After a reset, the device starts on the weather view.
+- **Low battery:** below the critical voltage the panel is not refreshed at all, so view presses are ignored (the LED still blinks).
+- A press during an ongoing poll or refresh is kept and handled right after it.
+
+The USB console has matching commands: `scripts/devcmd.sh poll | weather | tide`.
 
 ## Mounting
 

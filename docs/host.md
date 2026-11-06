@@ -22,7 +22,7 @@ Adjust `ExecStart` in the unit if the venv lives elsewhere. Config search order:
 | Command | Purpose |
 |---------|---------|
 | `wxd run` | Daemon: weather refresh every `weather.refresh_s`, continuous BLE scan, one session per device wake-up |
-| `wxd preview --out x.png` | Fetch + render to PNG, no BLE |
+| `wxd preview --out x.png [--view tide]` | Fetch + render the weather (or tide) view to PNG, no BLE |
 | `wxd scan [--seconds 15]` | List nearby WxPaper devices (shows the address for `ble.device_address`) |
 | `wxd push` | Wait for the device, push once, exit (non-zero if the loop is interrupted) |
 
@@ -30,9 +30,9 @@ Global flags: `--config PATH`, `-v`.
 
 Behaviour notes:
 - The last good weather model is cached as JSON (`<cache_dir>/model.json`) and reloaded on restart.
-- If no weather is available yet, the session answers `NO_CHANGE` (never sends a bogus image).
+- Each session renders both views: weather (slot 0) and tide (slot 1, `[tides]` in the config, CHS predictions refetched every 3 h, cached in `tides.json`). Only slots whose CRC differs from the device's stored one are uploaded, then `DONE`. A view with no data (fetch failing, no cache) is skipped and the device keeps its previous image; with neither, the session is just `DONE`.
 - After a successful session the same device is ignored for 60 s. The scanner is restarted every 30 min and after any error (exponential backoff 5 s to 5 min).
-- The device drops the link right after `COMMIT`/`NO_CHANGE`; a disconnect at that point counts as success. If the commit was actually lost, the next wake-up's `displayed_crc` will not match and the image is re-sent.
+- The device drops the link right after `DONE`; a disconnect at that point counts as success (every slot was already committed and acked).
 - Upload: chunk = min(244, MTU-3) bytes (with the u16 offset header included). A COMMIT/BEGIN error triggers one retry from BEGIN using write-with-response.
 
 ## BlueZ notes

@@ -4,6 +4,7 @@
  *
  * Line commands (terminated by CR or LF):
  *   poll   wake the main loop and poll the host now (no reboot)
+ *   weather / tide  switch the panel view (same as the view buttons)
  *   reset  software reset (no splash refresh; polls right after boot)
  *   boot   reboot into the Adafruit UF2 bootloader (PROMICRO drive)
  *   status uptime, battery, USB enable path/time, reset cause
@@ -73,6 +74,9 @@ static void cmd_work_fn(struct k_work *work)
 	if (strcmp(pending, "poll") == 0) {
 		LOG_INF("poll requested");
 		wx_wake_now();
+	} else if (strcmp(pending, "weather") == 0 || strcmp(pending, "tide") == 0) {
+		LOG_INF("%s view requested", pending);
+		wx_request_view(pending[0] == 't' ? WX_VIEW_TIDE : WX_VIEW_WEATHER);
 	} else if (strcmp(pending, "reset") == 0) {
 		LOG_WRN("software reset");
 		log_flush();
@@ -88,7 +92,7 @@ static void cmd_work_fn(struct k_work *work)
 		LOG_INF("status: USB enabled via %s at uptime %lld s", usb_en_via,
 			usb_en_uptime_ms < 0 ? -1LL : usb_en_uptime_ms / 1000);
 	} else if (pending[0] != '\0') {
-		LOG_INF("commands: poll | reset | boot | status | help  (1200-baud open = boot)");
+		LOG_INF("commands: poll | weather | tide | reset | boot | status | help  (1200-baud open = boot)");
 	}
 }
 
@@ -179,6 +183,6 @@ int devcmd_init(void)
 	(void)usb_power_init();
 	uart_irq_callback_set(uart, uart_cb);
 	uart_irq_rx_enable(uart);
-	LOG_INF("dev console: poll | reset | boot | status | help");
+	LOG_INF("dev console: poll | weather | tide | reset | boot | status | help");
 	return 0;
 }

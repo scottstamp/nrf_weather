@@ -14,6 +14,14 @@ name = "St. John's"
 [weather]
 refresh_s = 600        # background refresh period (>= 30)
 
+[tides]
+# Tide view (device slot 1), from CHS IWLS predictions. See docs/tides.md.
+enabled = true
+refresh_s = 10800      # refetch predictions every 3 h (they are static)
+# station_code = "00905"                          # St. John's
+# station_id = "5cebf1e33d0f4a073c4bc176"
+# station_name = "St. John's"
+
 [render]
 rotate = 90            # 90 or 270, depending on which side the panel connector is on
 red_invert = false     # keep false: fix panel red polarity in firmware (CONFIG_WX_EPD_RED_INVERT)

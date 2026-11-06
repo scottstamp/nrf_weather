@@ -3,5 +3,5 @@
  */
 #pragma once
 
-/* Poll button (DT node `poll_button`). Returns -ENODEV if the board has none. */
+/* Buttons (DT nodes poll_button, weather_button, tide_button). -ENODEV if none. */
 int button_init(void);
