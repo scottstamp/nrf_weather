@@ -24,7 +24,7 @@ def test_eccc_fixture():
     m = w.parse_eccc(load("eccc_nl-24.json"), CFG, now=NOW)
     assert m.source == "eccc" and m.location_name == "St. John's"
     c = m.current
-    assert c.temp_c == -3.4 and c.feels_like_c == -8
+    assert c.temp_c == -3.4 and round(c.feels_like_c) == -8  # computed; ECCC says -8
     assert c.wind_kph == 12 and c.wind_gust_kph == 39 and c.wind_dir == "SW"
     assert c.humidity_pct == 82 and c.pressure_kpa == 102.7 and c.pressure_tendency == "rising"
     assert "Airport" in c.station
@@ -48,8 +48,8 @@ def test_eccc_alerts_sorted_and_filtered():
         ("Special weather statement", AlertSeverity.STATEMENT),
     ]  # "ended" dropped, most severe first
     assert m.alerts[0].expires_at > m.alerts[0].issued_at
-    # windChill/iconCode removed in this fixture -> falls back, no crash
-    assert m.current.feels_like_c is None
+    # windChill/iconCode removed in this fixture -> computed from temp/wind, no crash
+    assert m.current.feels_like_c is not None
     assert m.current.icon is not Icon.UNKNOWN
 
 
@@ -118,3 +118,22 @@ def test_sample_model():
 
 def test_no_email_in_ua():
     assert "@" not in CFG.user_agent
+
+
+def test_feels_like_formulas():
+    assert round(w.feels_like(-10, 30, None)) == -20  # ECCC wind chill table
+    assert round(w.feels_like(6.9, 28, 5.0)) == 3
+    assert w.feels_like(15, 30, 10) is None  # neither wind chill nor humidex applies
+    assert round(w.feels_like(30, 10, 22)) == 39  # humidex
+    assert w.feels_like(None, 10, None) is None
+
+
+def test_eccc_stale_windchill_ignored():
+    # 2026-11-06: ECCC reported windChill -6 at +6.9 degC / 28 km/h
+    d = load("eccc_nl-24.json")
+    cc = d["properties"]["currentConditions"]
+    cc["temperature"]["value"] = {"en": 6.9, "fr": 6.9}
+    cc["wind"]["speed"]["value"] = {"en": 28, "fr": 28}
+    cc["windChill"] = {"value": {"en": -6, "fr": -6}}
+    c = w.parse_eccc(d, CFG, now=NOW).current
+    assert round(c.feels_like_c) == 3

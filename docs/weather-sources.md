@@ -30,7 +30,7 @@ https://api.weather.gc.ca/collections/citypageweather-realtime/items/nl-24?f=jso
 | `Current.temp_c` | `currentConditions.temperature.value.en` |
 | `condition` | `currentConditions.condition.en` ("Mainly Clear") |
 | `icon` | `currentConditions.iconCode.value` (see icon table); falls back to hourly[0], then forecast[0]. Day/night variant is then forced from obs time vs `riseSet` (obs icon can lag sunrise). |
-| `feels_like_c` | `windChill.value`, else `humidex.value`; None when absent |
+| `feels_like_c` | Computed locally (`weather.feels_like`): ECCC wind chill formula at ≤ 10 °C from `temperature` + `wind.speed`, humidex (≥ 25) at ≥ 20 °C from `dewpoint`; None between. ECCC `windChill` (only if T ≤ 0 °C) / `humidex` are fallbacks. The citypage `windChill` can be stale (2026-11-06: −6 reported at +6.9 °C). |
 | `wind_kph`, `wind_gust_kph`, `wind_dir` | `wind.speed/gust/direction.value` (gust absent when calm) |
 | `humidity_pct`, `pressure_kpa`, `pressure_tendency` | `relativeHumidity`, `pressure.value`, `pressure.tendency` (rising/falling/steady) |
 | `observed_at`, `station` | `timestamp.en` (UTC), `station.value.en` |

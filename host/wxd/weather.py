@@ -8,6 +8,7 @@ See docs/weather-sources.md for endpoints, field mapping and cadence.
 from __future__ import annotations
 
 import json
+import math
 import logging
 import re
 import urllib.parse
@@ -83,6 +84,28 @@ def _get(d: Any, *path: str) -> Any:
             return None
         d = d.get(k)
     return _loc(d)
+
+
+def feels_like(temp_c: float | None, wind_kph: float | None, dewpoint_c: float | None) -> float | None:
+    """ECCC-style feels-like: wind chill at <= 10 degC, humidex at >= 20 degC, else None.
+
+    Computed locally because the citypage ``windChill`` field can be stale
+    (seen 2026-11-06: windChill -6 reported at +6.9 degC / 28 km/h).
+    """
+    if temp_c is None:
+        return None
+    if temp_c <= 10 and wind_kph is not None:
+        v = float(wind_kph)
+        if v >= 5:
+            wc = 13.12 + 0.6215 * temp_c - 11.37 * v**0.16 + 0.3965 * temp_c * v**0.16
+        else:
+            wc = temp_c + (-1.59 + 0.1345 * temp_c) / 5 * v
+        return round(wc, 1)
+    if temp_c >= 20 and dewpoint_c is not None:
+        e = 6.11 * math.exp(5417.7530 * (1 / 273.16 - 1 / (273.15 + dewpoint_c)))
+        hx = temp_c + 0.5555 * (e - 10)
+        return round(hx, 1) if hx >= 25 else None
+    return None
 
 
 def _num(x: Any) -> float | None:
@@ -321,8 +344,12 @@ def parse_eccc(data: dict, cfg: WeatherConfig, now: datetime | None = None) -> W
         icon = set_daylight(icon, sunrise <= obs_t < sunset)
 
     temp = _num(_get(cc, "temperature", "value"))
-    feels = _num(_get(cc, "windChill", "value"))
-    if feels is None:
+    feels = feels_like(temp, _num(_get(cc, "wind", "speed", "value")),
+                       _num(_get(cc, "dewpoint", "value")))
+    if feels is None and (temp is None or temp <= 0):
+        # no wind/temp to compute from: trust ECCC's own value only where it is plausible
+        feels = _num(_get(cc, "windChill", "value"))
+    if feels is None and (temp is None or temp >= 20):
         feels = _num(_get(cc, "humidex", "value"))
     cond = _get(cc, "condition")
     if not cond and periods:
