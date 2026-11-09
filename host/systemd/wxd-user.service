@@ -1,0 +1,30 @@
+# wxd as a systemd *user* service: runs as you, straight from the repo venv.
+#
+# Install (see docs/host.md):
+#   mkdir -p ~/.config/wxd ~/.config/systemd/user
+#   cp host/config.example.toml ~/.config/wxd/config.toml      # edit [ble] adapter etc.
+#   cp host/systemd/wxd-user.service ~/.config/systemd/user/wxd.service
+#   systemctl --user daemon-reload && systemctl --user enable --now wxd
+#   sudo loginctl enable-linger $USER     # start at boot, keep running after logout
+#   journalctl --user -u wxd -f
+#
+# Config: ~/.config/wxd/config.toml. Cache + lock: ~/.cache/wxd.
+
+[Unit]
+Description=wxd e-paper weather display daemon (user)
+Documentation=file://%h/nrf_weather/docs/host.md
+After=network-online.target bluetooth.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust if the repo lives elsewhere.
+ExecStart=%h/nrf_weather/host/.venv/bin/wxd run
+Restart=always
+RestartSec=5
+# Log lines go to the journal already; don't buffer Python output.
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

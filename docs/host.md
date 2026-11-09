@@ -4,6 +4,24 @@ Linux daemon that fetches weather, renders a 296x128 B/W/R image and pushes it t
 
 ## Install
 
+Two options: a **user service** (simplest; runs as you from the repo venv) or a **system service** (dedicated `wxd` user).
+
+### User service (`host/systemd/wxd-user.service`)
+
+```sh
+cd /path/to/nrf_weather/host && python3 -m venv .venv && .venv/bin/pip install -e .
+mkdir -p ~/.config/wxd ~/.config/systemd/user
+cp config.example.toml ~/.config/wxd/config.toml                   # edit location, render, ble (adapter!)
+cp systemd/wxd-user.service ~/.config/systemd/user/wxd.service     # adjust ExecStart if the repo isn't ~/nrf_weather
+systemctl --user daemon-reload && systemctl --user enable --now wxd
+sudo loginctl enable-linger $USER                                  # start at boot, survive logout
+journalctl --user -u wxd -f
+```
+
+Cache and lock file: `~/.cache/wxd`. Stop it before a manual `wxd push`: `systemctl --user stop wxd`.
+
+### System service (`host/systemd/wxd.service`)
+
 ```sh
 sudo useradd --system --home-dir /var/lib/wxd --shell /usr/sbin/nologin --groups bluetooth wxd
 sudo mkdir -p /opt/wxd /etc/wxd
@@ -53,4 +71,4 @@ Behaviour notes:
 
 ## Single instance
 
-`wxd run`, `wxd push` and `wxd testpattern` take an exclusive lock on `<cache_dir>/wxd.lock`, which holds the PID. If two processes talk to the device at once, they race for the same connection and BlueZ fails both: `org.bluez.Error.InProgress` and then `br-connection-canceled` every ~2 s. This was seen in bring-up. A second instance now exits with `another wxd (pid N) is using the device`. To push or test by hand, stop the service first (`systemctl stop wxd`), or use `scripts/devcmd.sh poll` to have the running daemon serve the device immediately.
+`wxd run`, `wxd push` and `wxd testpattern` take an exclusive lock on `<cache_dir>/wxd.lock`, which holds the PID. If two processes talk to the device at once, they race for the same connection and BlueZ fails both: `org.bluez.Error.InProgress` and then `br-connection-canceled` every ~2 s. This was seen in bring-up. A second instance now exits with `another wxd (pid N) is using the device`. To push or test by hand, stop the service first (`systemctl stop wxd`, or `systemctl --user stop wxd` for the user service), or use `scripts/devcmd.sh poll` to have the running daemon serve the device immediately.

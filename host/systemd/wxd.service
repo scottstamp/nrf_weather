@@ -7,6 +7,7 @@ Wants=network-online.target bluetooth.target
 Type=simple
 User=wxd
 Group=wxd
+# Only needed where the BlueZ D-Bus policy restricts access to this group (Ubuntu allows everyone).
 SupplementaryGroups=bluetooth
 # Adjust to your install location.
 ExecStart=/opt/wxd/venv/bin/wxd --config /etc/wxd/config.toml run
@@ -16,7 +17,8 @@ CacheDirectory=wxd
 Environment=XDG_CACHE_HOME=/var/cache
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+# read-only (not true) so an editable install (pip install -e) from a repo in /home still works.
+ProtectHome=read-only
 PrivateTmp=true
 
 [Install]
