@@ -1,0 +1,27 @@
+# wxd in bridge mode as a systemd *user* service: serves images to the ESP32-C6 Wi-Fi/BLE
+# bridge over HTTP (docs/bridge.md). Replaces wxd-user.service: do not run both.
+#
+# Install (see docs/host.md, "Bridge mode"):
+#   mkdir -p ~/.config/wxd ~/.config/systemd/user
+#   cp host/config.example.toml ~/.config/wxd/config.toml      # edit [bridge] / [ble] poll_interval_s
+#   cp host/systemd/wxd-serve-user.service ~/.config/systemd/user/wxd-serve.service
+#   systemctl --user daemon-reload && systemctl --user enable --now wxd-serve
+#   sudo loginctl enable-linger $USER
+#   journalctl --user -u wxd-serve -f
+
+[Unit]
+Description=wxd e-paper weather display, bridge HTTP server (user)
+Documentation=file://%h/nrf_weather/docs/bridge.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/nrf_weather/host/.venv/bin/wxd serve
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

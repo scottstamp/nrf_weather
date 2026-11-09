@@ -1,4 +1,4 @@
-"""wxd CLI: run | preview | scan | push | testpattern."""
+"""wxd CLI: run | serve | preview | scan | push | testpattern."""
 
 from __future__ import annotations
 
@@ -248,6 +248,35 @@ async def cmd_run(cfg: Config, once: bool) -> int:
     return 0
 
 
+async def cmd_serve(cfg: Config) -> int:
+    """Bridge mode: refresh loops + HTTP server for the ESP32 bridge. No BLE, no adapter lock."""
+    from .bridge import BridgeServer
+
+    state = State(cfg)
+    state.load_cache()
+    try:
+        server = BridgeServer(state, cfg.bridge.listen, cfg.bridge.port, cfg.ble.poll_interval_s)
+    except OSError as e:
+        print(f"cannot listen on {cfg.bridge.listen}:{cfg.bridge.port}: {e} (is another wxd serve running?)", file=sys.stderr)
+        return 1
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop.set)
+    tasks = [asyncio.create_task(state.refresh_loop())]
+    if cfg.tides_enabled:
+        tasks.append(asyncio.create_task(state.tide_refresh_loop()))
+    server.start()
+    try:
+        await stop.wait()
+    finally:
+        log.info("shutting down")
+        for t in tasks:
+            t.cancel()
+        await asyncio.to_thread(server.stop)
+    return 0
+
+
 def cmd_preview(cfg: Config, out: str, view: str = "weather") -> int:
     from .render import render
 
@@ -339,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run", help="run the daemon")
+    sub.add_parser("serve", help="bridge mode: serve images to the ESP32 Wi-Fi/BLE bridge over HTTP (no BLE)")
     pv = sub.add_parser("preview", help="fetch + render to a PNG (no BLE)")
     pv.add_argument("--out", required=True)
     pv.add_argument("--view", choices=("weather", "tide"), default="weather")
@@ -361,6 +391,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "run":
             with ble_lock(cfg):
                 return asyncio.run(cmd_run(cfg, once=False))
+        if args.cmd == "serve":
+            return asyncio.run(cmd_serve(cfg))
         if args.cmd == "push":
             with ble_lock(cfg):
                 return asyncio.run(cmd_run(cfg, once=True))

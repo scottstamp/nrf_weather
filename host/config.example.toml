@@ -31,3 +31,9 @@ red_invert = false     # keep false: fix panel red polarity in firmware (CONFIG_
 # device_address = "AA:BB:CC:DD:EE:FF"   # optional: pin one device (default: match name/service UUID)
 adapter = "hci0"
 poll_interval_s = 600                     # sent via SET_INTERVAL if device differs (60..86400)
+
+# Only used by `wxd serve` (ESP32-C6 Wi-Fi/BLE bridge, see docs/bridge.md). No authentication:
+# bind to the LAN, not the internet.
+[bridge]
+listen = "0.0.0.0"
+port = 8787

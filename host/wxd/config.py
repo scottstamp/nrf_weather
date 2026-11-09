@@ -18,12 +18,19 @@ class BleConfig:
 
 
 @dataclass
+class BridgeConfig:
+    listen: str = "0.0.0.0"
+    port: int = 8787
+
+
+@dataclass
 class Config:
     # [location] and [weather] (minus refresh_s) are passed through to weather.WeatherConfig.
     location: dict[str, Any] = field(default_factory=lambda: {"lat": 47.5615, "lon": -52.7126, "name": "St. John's"})
     weather: dict[str, Any] = field(default_factory=dict)
     render: dict[str, Any] = field(default_factory=lambda: {"rotate": 90, "red_invert": False})
     ble: BleConfig = field(default_factory=BleConfig)
+    bridge: BridgeConfig = field(default_factory=BridgeConfig)
     refresh_s: int = 600
     # [tides]: enabled + refresh_s, the rest is passed through to tides.TideConfig.
     tides: dict[str, Any] = field(default_factory=dict)
@@ -71,6 +78,11 @@ def parse_config(data: dict[str, Any]) -> Config:
     cfg.ble = BleConfig(**b)
     if cfg.ble.device_address == "":
         cfg.ble.device_address = None
+    br = data.get("bridge", {})
+    unknown = set(br) - {f.name for f in dataclasses.fields(BridgeConfig)}
+    if unknown:
+        raise ValueError(f"unknown [bridge] keys: {sorted(unknown)}")
+    cfg.bridge = BridgeConfig(**br)
     if "cache_dir" in data:
         cfg.cache_dir = Path(data["cache_dir"]).expanduser()
     if cfg.refresh_s < 30:

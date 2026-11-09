@@ -1,0 +1,8 @@
+# Copy to sdkconfig.defaults.local (git-ignored) and fill in, then:
+#   rm -f sdkconfig && idf.py build
+CONFIG_WXB_WIFI_SSID="my-network"
+CONFIG_WXB_WIFI_PASSWORD="secret"
+# wxd serve on the host PC (hostname must resolve via your router's DNS; else use the IP)
+CONFIG_WXB_HOST_URL="http://tiny:8787"
+# Optional: only talk to this display
+# CONFIG_WXB_DEVICE_ADDR="EB:11:79:5D:39:62"

@@ -1,0 +1,32 @@
+menu "WxPaper bridge"
+
+config WXB_WIFI_SSID
+	string "Wi-Fi SSID"
+	default ""
+
+config WXB_WIFI_PASSWORD
+	string "Wi-Fi password"
+	default ""
+
+config WXB_HOST_URL
+	string "wxd serve base URL"
+	default "http://tiny:8787"
+	help
+	  Base URL of `wxd serve` on the host PC (no trailing slash).
+
+config WXB_DEVICE_ADDR
+	string "Pinned display BLE address (optional)"
+	default ""
+	help
+	  e.g. EB:11:79:5D:39:62. Empty = any device advertising the WxPaper
+	  service UUID or name.
+
+config WXB_DEBOUNCE_S
+	int "Ignore a display for this long after a successful session (s)"
+	default 20
+
+config WXB_HTTP_TIMEOUT_MS
+	int "HTTP timeout (ms)"
+	default 8000
+
+endmenu
