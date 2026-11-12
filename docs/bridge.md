@@ -1,9 +1,9 @@
-# Wi-Fi ⇄ BLE bridge (ESP32-C6)
+# Wi-Fi ⇄ BLE bridge (ESP32-C3 / C6)
 
-When the host PC is out of BLE range of the display, a small **ESP32-C6 bridge** (nanoESP32-C6 board) sits near the display. It does all BLE work, and gets the images from the host over Wi-Fi/LAN:
+When the host PC is out of BLE range of the display, a small **ESP32-C3 bridge** (any C3 board with 4 MB flash, e.g. a "C3 SuperMini"; an ESP32-C6 such as the nanoESP32-C6 works too, same code) sits near the display. It does all BLE work, and gets the images from the host over Wi-Fi/LAN:
 
 ```
- ┌──── host PC ("tiny", any room) ────┐   HTTP (LAN)    ┌──── ESP32-C6 bridge ────┐   BLE   ┌── WxPaper ──┐
+ ┌──── host PC ("tiny", any room) ────┐   HTTP (LAN)    ┌──── ESP32-C3 bridge ────┐   BLE   ┌── WxPaper ──┐
  │ wxd serve                          │◀──────────────▶│ scan, connect, read      │◀──────▶│ nRF52840 +  │
  │  weather + tide fetch (as before)  │  POST status    │ Status, upload slots,    │        │ e-paper     │
  │  render both views                 │  ← slot images  │ DONE                     │        └─────────────┘
@@ -54,7 +54,7 @@ Request: `Content-Type: application/json`, e.g.
 
 `200` with a small JSON: `{"weather_fetched_at": "...", "tides_fetched_at": "...", "last_result": {...}}`. Handy for `curl`.
 
-## Bridge session (ESP32-C6 firmware, `bridge/`)
+## Bridge session (ESP32 firmware, `bridge/`)
 
 1. Passive scan continuously; match service UUID `7a1e0001-…` or name `WxPaper` (optional pinned address).
 2. Connect, exchange MTU (247), discover the service and its 3 characteristics.
@@ -66,22 +66,25 @@ Request: `Content-Type: application/json`, e.g.
 
 On any failure (HTTP or BLE) the bridge disconnects without `DONE`; the display's own retry (5 min) and stale handling (OFFLINE after 3 h) apply as with the PC daemon.
 
-## Build and flash (nanoESP32-C6)
+## Build and flash
 
 Toolchain: ESP-IDF v6.1 (`source ~/.espressif/tools/activate_idf_v6.1.sh`).
 
 ```sh
 cd bridge
 cp sdkconfig.defaults.local.example sdkconfig.defaults.local   # Wi-Fi SSID/password, host URL (git-ignored)
-rm -f sdkconfig && idf.py build                                 # re-run `rm -f sdkconfig` after editing the .local file
+rm -f sdkconfig && idf.py build                                 # ESP32-C3 (default); re-run `rm -f sdkconfig` after editing the .local file
+# for an ESP32-C6 instead: rm -rf build sdkconfig && idf.py set-target esp32c6 && idf.py build
 idf.py -p /dev/serial/by-id/<the board> flash monitor
 ```
 
-- The nanoESP32-C6 has two USB-C ports. Either one flashes and shows the log: "CH343" is the UART bridge (UART0 console), and "ESP32C6" is the chip's own USB Serial/JTAG (secondary console). Use `/dev/serial/by-id/...` so you don't hit the nRF display's `/dev/ttyACM0` by mistake.
+- USB: most C3 boards (e.g. SuperMini) have one USB-C wired to the chip's own USB Serial/JTAG; it flashes and shows the log (secondary console, `/dev/ttyACM*`, "Espressif USB JTAG/serial debug unit"). Boards with a CH340/CP210x UART chip show up as `/dev/ttyUSB*` (UART0 console). The nanoESP32-C6 has both ports. Use `/dev/serial/by-id/...` so you don't hit the nRF display's `/dev/ttyACM0` by mistake.
+- If flashing fails to connect, hold BOOT (GPIO9), tap RESET, release BOOT, and flash again.
+- Antenna: cheap C3 boards often have a small PCB antenna. Keep the bridge in the same room as the display, and check the `rssi` in the session log (better than about −80 dBm is fine).
 - Power: any USB charger. The bridge scans all the time (~30–40 mA), so it can't run on a battery.
 - Placement: within easy BLE range of the display (same room) and in Wi-Fi range.
 - Host: run `wxd serve` (not `wxd run`) on the PC; see `host.md` "Bridge mode". `CONFIG_WXB_HOST_URL` must resolve from the ESP32. Use the PC's IP if your router doesn't resolve its hostname.
-- Partition table: single app, 1.5 MB (Wi-Fi + BLE + HTTP is ~1.3 MB).
+- Partition table: single app, 1.5 MB (the image is ~1.0 MB on the C3, ~1.3 MB on the C6). Needs a 4 MB flash board; 2 MB C3 variants are too small.
 
 Log of a good session (115200 baud):
 
@@ -91,4 +94,4 @@ wx_ble: slot 0: 40 writes of 244 B, rsp=0, 1900 ms, commit rc=0
 wx_ble: session EB:11:79:5D:39:62: uploaded slots=[0] 3100 ms
 ```
 
-Status: firmware builds clean, and the host side was tested end-to-end with a fake status. **Not yet tested on hardware** (ESP32-C6 ⇄ display).
+Status: firmware builds clean, and the host side was tested end-to-end with a fake status. **Not yet tested on hardware** (ESP32 ⇄ display). Builds checked for esp32c3 (default) and esp32c6.

@@ -1,5 +1,5 @@
 /*
- * WxPaper Wi-Fi <-> BLE bridge for ESP32-C6 (docs/bridge.md).
+ * WxPaper Wi-Fi <-> BLE bridge for ESP32-C3 / C6 (docs/bridge.md).
  * Wi-Fi station with build-time credentials; BLE central in wx_ble.c.
  */
 #include <string.h>

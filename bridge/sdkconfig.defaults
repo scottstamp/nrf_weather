@@ -1,4 +1,5 @@
-CONFIG_IDF_TARGET="esp32c6"
+# Default target; `idf.py set-target esp32c6` also works (same code)
+CONFIG_IDF_TARGET="esp32c3"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # Bluetooth: NimBLE, central only

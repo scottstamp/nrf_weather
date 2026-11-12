@@ -1,4 +1,4 @@
-# WxPaper Wi-Fi <-> BLE bridge (ESP32-C6). See docs/bridge.md.
+# WxPaper Wi-Fi <-> BLE bridge (ESP32-C3, also builds for C6). See docs/bridge.md.
 cmake_minimum_required(VERSION 3.22)
 
 # Wi-Fi credentials / host URL live in a git-ignored local defaults file.
